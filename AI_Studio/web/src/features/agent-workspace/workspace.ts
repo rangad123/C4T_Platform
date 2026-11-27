@@ -5,7 +5,7 @@
  */
 import type { Job } from "../../api";
 import type { Tone } from "../../lib/labels";
-import { isActive, progressPercent } from "../../lib/labels";
+import { isActive, runningLabel } from "../../lib/labels";
 import { relativeTime } from "../../lib/format";
 import type { AgentId } from "../testing-agents/testing-agents";
 
@@ -46,12 +46,15 @@ export const RUN_STATUS_HELP: Partial<Record<AgentStatus, string>> = {
     failed: "The run stopped with a problem; the reason is on its page. What it found before then is kept.",
 };
 
+/** A queued run, explained: what it waits for. */
+export const QUEUED_HELP = "Nothing has started this run yet: it waits for the AI Studio worker, or for your runner when runs go to runners. It starts as soon as one is free.";
+
 /** The status as the card says it (SPEC §1): Not run yet, Running n%, Done (when), Stopped (what it found is kept), Failed, Needs input. */
 export function statusWords(a: Pick<WorkspaceAgent, "status" | "lastRun">): { label: string; tone: Tone } {
     const run = a.lastRun;
     switch (a.status) {
         case "running":
-            return { label: `Running ${run ? progressPercent(run) : 0}%`, tone: "info" };
+            return run ? { label: runningLabel(run), tone: run.status === "QUEUED" ? "neutral" : "info" } : { label: "Running 0%", tone: "info" };
         case "done":
             return { label: `Done ${relativeTime(run?.finishedAt ?? run?.createdAt)}`, tone: "success" };
         case "stopped":

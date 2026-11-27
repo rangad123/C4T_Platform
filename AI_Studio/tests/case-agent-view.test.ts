@@ -3,8 +3,8 @@
  *   - FX14: the web reads whether a project is one from the server (GET /api/projects/:id/testing-agents answers `caseAgent`, worked
  *     out by src/platform/case-agent.ts), so the web view, the testing-agents answer, the outcome's `caseAgent` and the server rule
  *     agree on mixed, agent-only TCG, TCG with other agents (Q6), code, other-agent and no-choice projects;
- *   - FX12: in a TCG project that also chose the API Testing Agent, nothing asks for the OpenAPI document (that agent does not run,
- *     Q6): the agent-inputs answer misses nothing and an exploration is not refused. An OpenAPI document already saved stays saved.
+ *   - FX12: in a TCG project that also chose the API Testing Agent, a test case exploration is not refused for the OpenAPI document
+ *     (that run is Test Case Generation's, Q6); the agent-inputs answer names the API agent's need as its Workspace card does (D1, a3). An OpenAPI document already saved stays saved.
  *     A project of the API agent alone still misses it and is refused, as before.
  * In-process (app.inject), no browser:  node scripts/with-lock.mjs tsc -- npx vitest run tests/case-agent-view.test.ts
  */
@@ -96,12 +96,15 @@ describe("the web and the server agree which projects are Test Case Generation p
     });
 });
 
-describe("a Test Case Generation project that also chose the API Testing Agent is not asked for the OpenAPI document (FX12)", () => {
-    it("nothing is missing, and an exploration starts", async () => {
+describe("a Test Case Generation project that also chose the API Testing Agent is not refused a test case run for the OpenAPI document (FX12)", () => {
+    it("a test case exploration starts; the API agent's own need is said as its Workspace card says it (one run = one agent, D1; a3)", async () => {
         const pid = await project("Cases and API", ["agent"], ["test-generation", "api"]);
         const inputs = await call("GET", `/api/projects/${pid}/agent-inputs`);
         expect(inputs.status).toBe(200);
-        expect(inputs.body.missing).toEqual([]);
+        // The API Testing Agent runs on its own from the Workspace, where its card says it needs the document: the Requirements tab says the same.
+        expect(inputs.body.missing).toEqual([expect.objectContaining({ agent: "api", input: "openApiUrl" })]);
+        const card = (await call("GET", `/api/projects/${pid}/workspace?agent=api`)).body.agents[0];
+        expect(card.needs).toEqual([inputs.body.missing[0].text]);
         const started = await call("POST", `/api/projects/${pid}/test-generation`, { url: SITE, plan: true });
         expect(started.status, JSON.stringify(started.body)).toBe(202);
     });

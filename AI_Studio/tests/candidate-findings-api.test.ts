@@ -177,6 +177,22 @@ describe("GET /api/projects/:id/candidate-findings", () => {
     });
 });
 
+describe("GET /api/projects/:id/candidate-findings?agent= and the issue a finding was filed as (fresh review steps 4 and 6)", () => {
+    it("answers one agent's findings only, and names the issue its test was filed as, so a reload still says so", async () => {
+        const C = seedProject(platform, "Agent shop", "https://agent.example.test");
+        const job = await platform.repo.createJob(C.projectId, C.appId, { ...DEFAULT_JOB_OPTIONS, agentId: "security" });
+        const sink = new RepoSink(platform.repo, platform.store, { id: job.id, projectId: C.projectId, applicationId: C.appId });
+        const h = await sink.createTest({ spec: spec("Orders stay private"), framework: "playwright", validation: "NEEDS_REVIEW", reason: "Found a defect", meta: { capture: "captured", finding: finding("Orders stay private") } });
+        await sink.writes.flush();
+        const of = async (agent: string) => (await call(`/api/projects/${C.projectId}/candidate-findings?agent=${agent}`)).body.findings as Array<{ testId: string; review: { issue: unknown } }>;
+        expect((await of("security")).map((f) => f.testId)).toEqual([h.id]);
+        expect(await of("ux")).toEqual([]);
+        expect((await of("security"))[0]!.review.issue).toBeNull();
+        platform.db.run("INSERT INTO issue_links (id, test_case_id, integration_id, provider, external_id, url, title, created_at) VALUES (?,?,?,?,?,?,?,?)", "il-1", h.id, null, "github", "#7", "https://github.example/acme/shop/issues/7", "x", new Date().toISOString());
+        expect((await of("security"))[0]!.review.issue).toMatchObject({ provider: "github", externalId: "#7", url: "https://github.example/acme/shop/issues/7" });
+    });
+});
+
 // ── P3-22: objectives preview and a run's coverage ──────────────────────────────────────────────────────────────────────────────────
 
 const objectivesUrl = (s: Seed | string) => `/api/projects/${typeof s === "string" ? s : s.projectId}/objectives`;

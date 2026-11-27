@@ -2,8 +2,8 @@
  * Candidate findings (testing-engine Phase 3, candidate-finding-store.ts): what exploration found, as candidates for a person to
  * review. Reading needs access to the project (auth/roles.ts); nothing here changes a finding, and none is ever "confirmed" in Phase 3.
  *
- *   GET /api/projects/:id/candidate-findings?job=   → { findings: [CandidateFindingRecord & { review }] }, newest seen first; `job`:
- *                                                     that run's (found first or last). Another project's run answers 404. `review`
+ *   GET /api/projects/:id/candidate-findings?job=&agent= → { findings: [CandidateFindingRecord & { review }] }, newest seen first; `job`:
+ *                                                     that run's (found first or last), `agent`: that agent's runs'. Another project's run answers 404. `review`
  *                                                     is what the results card shows (Phase 5 U1): the status label (findings/score.ts
  *                                                     `label`: never "Confirmed" below high confidence), severity and confidence each
  *                                                     with its basis, reproduction "same of of", the saved test's steps and the
@@ -12,8 +12,8 @@
  *                                                     verification attempts' screenshots, the
  *                                                     likely cause with its label (root-cause.ts; null, with `noCause` saying why,
  *                                                     while none was found), the state's name and rank, and whether a person may Confirm or
- *                                                     call it Not a bug (lifecycle.ts). Computed here, so the page has no rule of
- *                                                     its own.
+ *                                                     call it Not a bug (lifecycle.ts), and the issue it was filed as (or null).
+ *                                                     Computed here, so the page has no rule of its own.
  *   GET /api/projects/:id/objectives                  → { available: true, objectives: [{ id, kind, source, question, expected, operators,
  *                                                     priority, reason }], overCap } from the latest analysed model, worked out the way
  *                                                     the objective stage does (explore/objectives.ts) with the project's level, without
@@ -35,7 +35,11 @@ import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate
 import { fromCandidate } from "../findings/adapters.js";
 import { projectRootCause } from "../code-host/source.js";
 import { loadExploration, loadLayerReport } from "../exploration-store.js";
+import { jobBelongsTo } from "../agent-workspace.js";
 import { HttpError } from "../http-error.js";
+import type { AgentId } from "../testing-agents.js";
+import { IntegrationStore } from "../issues/store.js";
+import { SecretBox } from "../secrets.js";
 import { appKnowledgeOf } from "../job-runner.js";
 import type { RouteCtx } from "./types.js";
 
@@ -45,6 +49,7 @@ const NO_COVERAGE = "This run has no coverage record: it did not explore by obje
 export function registerExploreFindingRoutes(ctx: RouteCtx): void {
     const { app, p, repo } = ctx;
     const store = new CandidateFindingStore(p.sql);
+    const issues = new IntegrationStore(p.db, new SecretBox(p.config.dataDir, p.config.SECRET_KEY));
 
     const reviewOf = async (r: CandidateFindingRecord) => {
         const t = r.testId ? repo.getTest(r.testId) : undefined;
@@ -83,16 +88,25 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
             stateLabel: STATE_LABEL[r.state],
             stateRank: FINDING_STATES.indexOf(r.state),
             personMay: { confirm: moversOf(r.state, "confirmed").includes("person"), notABug: moversOf(r.state, "not_a_bug").includes("person") },
+            // The issue it was filed as (the link is kept with its test, routes/integrations.ts), so a reload still says so.
+            issue: (r.testId ? issues.linksForTest(r.testId)[0] : undefined) ?? null,
         };
     };
 
     app.get("/api/projects/:id/candidate-findings", async (req) => {
         const { id } = req.params as { id: string };
         ctx.project(id);
-        const q = req.query as { job?: unknown };
+        const q = req.query as { job?: unknown; agent?: unknown };
         const job = typeof q.job === "string" && q.job !== "" ? q.job : undefined;
         if (job !== undefined && repo.getJob(job)?.projectId !== id) throw new HttpError(404, "Run not found");
-        return { findings: await Promise.all((await store.list(id, job ? { jobId: job } : {})).map(async (r) => ({ ...r, review: await reviewOf(r) }))) };
+        let list = await store.list(id, job ? { jobId: job } : {});
+        // One agent's findings (its agent page): found first or last by one of that agent's runs (agent-workspace.ts jobBelongsTo).
+        if (typeof q.agent === "string" && q.agent !== "") {
+            const agent = q.agent as AgentId;
+            const mine = new Set(repo.listJobs(id).filter((j) => jobBelongsTo(j, agent)).map((j) => j.id));
+            list = list.filter((r) => (r.firstJobId !== null && mine.has(r.firstJobId)) || (r.lastJobId !== null && mine.has(r.lastJobId)));
+        }
+        return { findings: await Promise.all(list.map(async (r) => ({ ...r, review: await reviewOf(r) }))) };
     });
 
     app.get("/api/projects/:id/objectives", async (req) => {

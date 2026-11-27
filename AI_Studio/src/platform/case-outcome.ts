@@ -392,7 +392,7 @@ export function uncoveredRequirements<R extends { ref: string }>(requirements: r
 export async function mergedOf(p: Platformish, projectId: string): Promise<MergedRuns & { uncovered: Array<{ ref: string; title: string }> }> {
     const jobs = await caseRunsOf(p, projectId);
     const inputs: CaseRunInput[] = [];
-    for (const j of jobs) inputs.push({ run: { jobId: j.id, startedAt: j.startedAt ?? j.createdAt, status: runStatusOf(j) }, part: await readCaseRun(p, j) });
+    for (const j of jobs) inputs.push({ run: { jobId: j.id, startedAt: j.startedAt ?? j.createdAt, status: runStatusOf(j), ...(runStatusOf(j) === "failed" && j.error ? { reason: j.error } : {}) }, part: await readCaseRun(p, j) });
     const merged = mergeCaseRuns(inputs);
     const active = (await new RequirementStore(p.db.sql).list(projectId)).filter((r) => r.status === "active").map((r) => ({ ref: r.ref, title: r.title }));
     const refs = new Set(active.map((r) => refKey(r.ref)));

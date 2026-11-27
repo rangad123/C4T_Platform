@@ -43,8 +43,11 @@ export function NewProject({ projectId, agentId }: { projectId: string; /** A ru
     const config = useConfig();
     // What the project's testing agents need lives on its Requirements tab (round 38); here only whether something mandatory is missing.
     const inputs = useFetch<AgentInputs>(`/projects/${projectId}/agent-inputs`);
-    // A run of one agent asks only for what that agent misses.
-    const missing = (inputs.data?.missing ?? []).filter((m) => !agentId || m.agent === agentId);
+    // A run of one agent asks only for what that agent misses (D1). Unnamed, the run is Test Case Generation's when it is chosen, or the one
+    // chosen agent's (the server's rule, routes/agent-workspace.ts), so only that agent's inputs are asked for.
+    const chosen = inputs.data?.agents?.ids ?? [];
+    const runAgent = agentId ?? (chosen.includes("test-generation") ? "test-generation" : chosen.length === 1 ? chosen[0] : undefined);
+    const missing = (inputs.data?.missing ?? []).filter((m) => !runAgent || m.agent === runAgent);
     const [askOpen, setAskOpen] = useState(false);
     const asked = useRef(false);
     useEffect(() => {

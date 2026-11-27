@@ -201,6 +201,10 @@ export interface FindingReportInput {
     evidenceUrl?: string;
     explanation?: Explanation;
     rootCause?: RootCause;
+    /** The answers the failing attempt received, as its evidence package kept them (masked, verify-service.ts bodiesOf). */
+    answers?: ReadonlyArray<{ request: string; body: string; cut?: true }>;
+    /** The project's test accounts' sign-in names by account name ("main": the project's own test account); never a secret. */
+    accounts?: ReadonlyMap<string, string>;
 }
 
 /**
@@ -235,6 +239,54 @@ const NEXT_BY_CLASS: Record<string, string> = {
     open: "Follow the steps on the application by hand and see which of the possible causes it is.",
 };
 
+/** The check's own value pasted after the expected text by an adapter: a settings object, a list, or "undefined". Engine text, not a result. */
+const RAW_VALUE = /\s*\((?:\{.*?\}|\[.*?\]|undefined|null)\)(?=\s*(?:\(source:|$))/g;
+const comparable = (s: string) => s.replace(/^Error:\s*/i, "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/** What the failing check found, in a few words: "got 201, expected 400", a relation's values, or a field the answer should not hold. */
+function gotPhrase(f: FindingView, failed: FindingView["attempts"][number] | undefined): string {
+    if (failed?.check === "jsonType" && failed.value === "undefined" && failed.target) return `the answer has “${failed.target}”`;
+    const pair = /^Expected (.+?), got (.+)$/.exec(f.observed.trim());
+    if (pair && pair[1]!.length <= 80 && pair[2]!.length <= 80) return `got ${pair[2]}, expected ${pair[1]}`;
+    const values = /check failed \([^)]*\):.*?Values?:\s*(.+?)\.?$/s.exec(failed?.error ?? f.observed);
+    return values ? values[1]!.split(/\n/)[0]!.slice(0, 120) : "";
+}
+
+/**
+ * The report's title says what went wrong, not the test's name (a test's title states what should happen and reads as a passing test in
+ * a tracker): an engine check's own sentence about the defect ("A signed-in “ben” user can open /notes/n1 …"), first clause only; else
+ * the check that failed, where it was sent, and what it found.
+ */
+function reportTitle(f: FindingView, spec: TestSpec | undefined, failed: FindingView["attempts"][number] | undefined): string {
+    const said = f.observed.trim();
+    if (/^(?:A signed-in|After (?:the|signing))\b/.test(said)) return said.split(/,? so |: check | \(documented| \(each |; it was changed back|\. /)[0]!.replace(/[,.;]$/, "");
+    // An exploration's own one-sentence observation is what went wrong ("Two items of 15.00 show a subtotal of 15.00.").
+    if (/^[^\n]{12,160}$/.test(said) && !/^(?:Error\b|Expected\b)|\.\s+\S/.test(said)) return said.replace(/\.$/, "");
+    const step = failed?.failedStep ? spec?.steps[failed.failedStep - 1] : undefined;
+    const ruleOnly = /^As stated: rule\b/i.test(f.title);
+    const check = step?.description && step.action !== "request" ? step.description : ruleOnly ? f.expected.text.replace(RAW_VALUE, "") : f.title;
+    const api = spec?.steps.some((s) => s.action === "request") ? failed?.requests.filter((r) => r.own).at(-1) : undefined;
+    const at = api && !check.includes(api.path) ? ` on ${api.method} ${api.path}` : "";
+    const got = gotPhrase(f, failed);
+    return `Failed: ${check.replace(/[.\s]+$/, "")}${at}${got ? ` (${got})` : ""}`;
+}
+
+/** A step in words; a request step also names the body it sends when its own words leave it out (the discount code, the broken value). */
+function stepWords(s: TestSpec["steps"][number]): string {
+    const words = describeStep(s);
+    if (s.action !== "request" || s.body === undefined || s.body === null || words.includes("{")) return words;
+    return `${words} with ${typeof s.body === "string" ? s.body : JSON.stringify(s.body)}`;
+}
+
+/** "the “ana” test account" → "the “ana” test account (ana@example.test)": the sign-in name, so someone outside AI Studio can sign in as it. */
+function withSignIn(account: string, accounts: ReadonlyMap<string, string> | undefined): string {
+    const masked = line(account, 200);
+    if (!accounts?.size) return masked;
+    return masked
+        .replace(/the “([^”]+)” test account/g, (m, name: string) => (accounts.get(name) ? `${m} (${accounts.get(name)})` : m))
+        .replace(/the project's test account/, (m) => (accounts.get("main") ? `${m} (${accounts.get("main")})` : m));
+}
+
 const where = (l: { file: string; line: number; function?: string; route?: string }) => `${l.file}:${l.line}${l.function ? ` in ${l.function}()` : ""}${l.route ? ` (${l.route})` : ""}`;
 
 /** The 13 fields from a finding group, every text masked for leaving AI Studio. */
@@ -248,7 +300,7 @@ export function buildFindingReport(src: FindingReportInput): FindingReport {
     const failed = f.attempts.find((a) => a.outcome !== "passed");
 
     const steps = src.spec
-        ? src.spec.steps.map((s, i) => `${line(describeStep(s), 200)}${failed?.failedStep === i + 1 ? "  ← failed here" : ""}`)
+        ? src.spec.steps.map((s, i) => `${line(stepWords(s), 300)}${failed?.failedStep === i + 1 ? "  ← failed here" : ""}`)
         : f.steps.map((s, i) => `${line(`${s.action}${s.target ? ` ${s.target}` : ""}${s.url ? ` ${s.url}` : ""}`, 200)}${failed?.failedStep === i + 1 ? "  ← failed here" : ""}`);
     const area = src.area ?? src.spec?.category ?? failed?.page ?? null;
     const env = [
@@ -257,6 +309,18 @@ export function buildFindingReport(src: FindingReportInput): FindingReport {
         src.environment.browser ? `Browser: ${line(src.environment.browser, 100)}` : "",
     ].filter(Boolean);
     const requests = (failed?.requests ?? []).slice(0, 10).map((r) => `${line(r.method, 10)} ${line(r.path, 200)}${r.body ? ` ${line(r.body, 300)}` : ""} → ${r.error ? line(r.error, 120) : (r.status ?? "no answer")}`);
+    const answers = (src.answers ?? []).slice(-3).map((a) => `Answer to ${line(a.request.replace(/ -> /, " → "), 200)}: ${line(a.body, 600)}${a.cut ? " (cut)" : ""}`);
+    // The failure's own text once: the error when it holds the headline (or is the headline, rawer), else both.
+    const said = line(f.observed.replace(/^Error:\s*/i, ""), 1000);
+    const err = failed?.error ? line(failed.error.replace(/^Error:\s*/i, ""), 600) : "";
+    const jsonField = failed?.check === "jsonType" && failed.value === "undefined" && failed.target ? `The answer has a “${line(failed.target, 100)}” field; it should have none.` : "";
+    const actual = jsonField
+        ? [jsonField]
+        : !err || comparable(said).includes(comparable(err))
+          ? [said]
+          : comparable(err).includes(comparable(said))
+            ? [/^Error:/i.test(f.observed.trim()) ? err : said]
+            : [said, err];
     const rc = src.rootCause;
     const cause = rc?.location
         ? [`${ROOT_CAUSE_LABEL_TEXT[rc.label]}: ${line(where(rc.location), 300)}`, line(rc.location.explanation ?? rc.reason, 600)]
@@ -264,21 +328,22 @@ export function buildFindingReport(src: FindingReportInput): FindingReport {
     const next = src.explanation?.next ?? (rc?.location ? `Look at ${where(rc.location)} first. ${NEXT_BY_CLASS[cls] ?? NEXT_BY_CLASS.open}` : NEXT_BY_CLASS[cls] ?? NEXT_BY_CLASS.open!);
 
     return {
-        title: [line(f.title, 240)],
+        title: [line(reportTitle(f, src.spec, failed), 240)],
         severity: [`${SEVERITY_WORD[sev.severity] ?? sev.severity}: ${line(sev.basis, 300)}`],
         confidence: [`${conf.confidence[0]!.toUpperCase()}${conf.confidence.slice(1)}: ${line(conf.basis, 300)}`],
         area: area ? [line(area, 200)] : [],
         environment: env,
         preconditions: [
             ...(src.spec?.preconditions.length ? src.spec.preconditions.map((p) => line(p, 300)) : ["None stated: the steps start in a new browser session."]),
-            ...(f.account ? [`Signed in as ${line(f.account, 200)}.`] : []),
+            ...(f.account ? [`Signed in as ${withSignIn(f.account, src.accounts)}.`] : []),
         ],
         steps,
-        expected: [`${line(f.expected.text, 600)}${f.expected.source ? ` (source: ${line(f.expected.source, 100)})` : ""}`],
-        actual: [line(f.observed, 1000), ...(failed?.error ? [line(failed.error, 600)] : [])].filter(Boolean),
+        expected: [`${line(f.expected.text.replace(RAW_VALUE, ""), 600)}${f.expected.source ? ` (source: ${line(f.expected.source, 100)})` : ""}`],
+        actual: actual.filter(Boolean),
         reproduction: rep.of ? [`${rep.same} of ${rep.of} attempts failed the same way.`] : [],
         evidence: [
             ...requests,
+            ...answers,
             ...(failed?.stack.length ? [`Stack: ${failed.stack.slice(0, 4).map((s) => line(s, 120)).join(" < ")}`] : []),
             src.evidenceUrl ? "Screenshots, traces and the full request list are kept in AI Studio (link below)." : "Screenshots, traces and the full request list are kept in AI Studio.",
         ],

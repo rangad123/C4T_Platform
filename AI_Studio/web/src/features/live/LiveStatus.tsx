@@ -6,13 +6,13 @@ import "./live.css";
  * One line that always takes the same space, so nothing jumps when live updates start, pause or stop.
  * Only this line is a polite live region (the newest message), never the whole log.
  */
-export function LiveLine({ state, latest }: { state: LiveState; latest?: string }) {
+export function LiveLine({ state, latest, queued }: { state: LiveState; latest?: string; /** The run is queued: nothing has started it yet. */ queued?: boolean }) {
     const retrying = state === "retrying";
     return (
         <div className="live-line" data-live-state={state}>
             {state === "live" || retrying ? <span className={`live-dot ${retrying ? "retrying" : ""}`} aria-hidden /> : null}
             <span className="live-text" role="status" aria-live="polite">
-                {retrying ? "Live updates paused, retrying. This page still refreshes on its own." : state === "live" ? (latest ?? "Live. Waiting for the next step.") : ""}
+                {retrying ? "Live updates paused, retrying. This page still refreshes on its own." : state === "live" ? (latest ?? (queued ? "Waiting for a worker or runner to start this run. It starts as soon as one is free; until then nothing happens." : "Live. Waiting for the next step.")) : ""}
             </span>
         </div>
     );

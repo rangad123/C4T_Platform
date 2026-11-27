@@ -198,8 +198,11 @@ function tableCandidate(line: string): { id?: string; idOrigin: Candidate["idOri
     return "skip";
 }
 
+/** A sentence about the document itself ("This document states how the store must behave.") introduces requirements; it is none. */
+const ABOUT_DOCUMENT = /^(?:this|the following|the present)\s+(?:document|specification|spec|file|page|list|section)\b/i;
+
 function keepable(text: string): boolean {
-    return text.length >= 8 && wordCount(text) >= 2 && !METADATA.test(text);
+    return text.length >= 8 && wordCount(text) >= 2 && !METADATA.test(text) && !ABOUT_DOCUMENT.test(text);
 }
 
 /**

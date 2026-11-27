@@ -491,6 +491,11 @@ describe("a person's actions, from the keyboard", () => {
         await pwExpect(f.getByTestId("finding-issue")).toContainText("Filed as GitHub #1");
         await pwExpect(f.getByTestId("finding-issue").getByRole("link")).toHaveAttribute("href", "https://github.example/acme/shop/issues/1");
         expect(issues).toHaveLength(1);
+        // After a reload the finding still says where it was filed, and offers no second filing.
+        await visit(run);
+        const again = row("The payments page answered something else.");
+        await pwExpect(again.getByTestId("finding-issue")).toContainText("Filed as GitHub #1");
+        await pwExpect(again.getByRole("button", { name: "File issue" })).toHaveCount(0);
     }, 60_000);
 
     it("Split takes a finding out of its group", async () => {
@@ -505,6 +510,35 @@ describe("a person's actions, from the keyboard", () => {
         // Alone in its group now: splitting again is refused with the platform's sentence.
         await f.getByRole("button", { name: "Split" }).click();
         await pwExpect(f.getByRole("alert")).toHaveText("This finding is not grouped with others, so there is nothing to split.");
+    }, 60_000);
+});
+
+describe("an agent project's findings are on the agent that found them (fresh review, step 4)", () => {
+    it("the Security agent's Outcome tab lists its findings with their actions; another agent's does not", async () => {
+        const p2 = (await call("POST", "/api/projects", { name: "Agent findings", platforms: ["web"], testingModes: ["agent"] })).body.id as string;
+        expect((await call("PUT", `/api/projects/${p2}/testing-agents`, { agents: ["security", "ux"] })).status).toBe(200);
+        const app2 = platform.repo.createApplication(p2, "https://shop.example.test", { ...DEFAULT_JOB_OPTIONS });
+        const job = (await platform.repo.createJob(p2, app2, { ...DEFAULT_JOB_OPTIONS, mode: "generate", agentId: "security" })).id;
+        platform.repo.setJobStatus(job, "COMPLETED");
+        const suite = platform.repo.getOrCreateSuite(p2, "Exploration", "exploration");
+        const testId = platform.repo.insertTest({ projectId: p2, suiteId: suite, jobId: job, spec: TestSpecSchema.parse({ testId: "WEB-001", title: "Orders stay private", kind: "web", category: "Security", priority: "high", steps: STEPS }), framework: "playwright", validationStatus: "NEEDS_REVIEW" });
+        const fid = (await store.upsert({ projectId: p2, jobId: job, testId, finding: verified("orders") })).finding.id;
+        await store.transition(p2, fid, { to: "verification_pending", by: "engine" });
+        await store.transition(p2, fid, { to: "reproduced", by: "engine", set: { severity: "high", attempts: ATTEMPTS, confidence: score("high", "the same failure in 2 of 3 attempts") } });
+        await store.transition(p2, fid, { to: "confirmed", by: "engine" });
+
+        await page.goto("about:blank");
+        await page.goto(`${BASE}/#/projects/${p2}/agents/security`);
+        const mine = page.getByTestId("run-findings");
+        await pwExpect(mine.getByRole("heading", { name: "Findings to check (1)" })).toBeVisible();
+        await pwExpect(mine.getByTestId("finding-observed")).toHaveText("The orders page answered something else.");
+        await pwExpect(mine.getByRole("button", { name: "Not a bug" })).toBeVisible();
+        await shot("agent-outcome-findings");
+        await page.goto("about:blank");
+        await page.goto(`${BASE}/#/projects/${p2}/agents/ux`);
+        await pwExpect(page.getByRole("tab", { name: "Outcome" }).or(page.getByText("Outcome").first())).toBeVisible();
+        await page.waitForTimeout(500);
+        await pwExpect(page.getByTestId("run-findings")).toHaveCount(0);
     }, 60_000);
 });
 

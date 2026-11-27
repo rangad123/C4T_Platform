@@ -229,13 +229,18 @@ export function cutByMaxlength(spec: TestSpec, failedStep: number | undefined, l
  *    so no page can match it (paid L4 shop-1 WEB-026: "textbox \"Name\": Test User {{unique}}");
  *  - an exact-text check on an element it finds by a different text;
  *  - the page the test itself opened answered 404 at the failing step: the application has no such page, so the check never saw the page it
- *    was written for (paid L4 rbac-3 WEB-049: GET /people → 404, the People page is elsewhere).
+ *    was written for (paid L4 rbac-3 WEB-049: GET /people → 404, the People page is elsewhere); or, for a check that expects a refusal,
+ *    the opened page answered 401/403 itself: the access was refused, so the failure is about the page's words, not about access;
+ *  - the action the test is about (its title: delete, remove, archive) is done by none of its steps, so the checks after it never saw its
+ *    result (paid L4 rbac-1 WEB-027, rbac-2 WEB-047, rbac-5 WEB-049: "delete a note" tests that never press Delete).
  */
 export function ownCheckFault(spec: TestSpec, attempts: ReadonlyArray<{ outcome: string; failedStep?: number; requests: ReadonlyArray<{ method: string; path: string; status: number | null; own: boolean }> }>): string | undefined {
     if (spec.kind !== "web") return undefined;
     const failed = attempts.filter((a) => a.outcome === "failed" && a.failedStep !== undefined);
     if (!failed.length) return undefined;
     const check = spec.steps[failed[0]!.failedStep! - 1];
+    const never = check?.action === "assert" ? actionNeverDone(spec) : undefined;
+    if (never) return never;
     if (check?.action === "assert" && (check.check === "ariaSnapshot" || check.check === "urlPattern") && /\{\{[^}]*\}\}/.test(String(check.expected ?? "")))
         return `The check expects “${String(check.expected).match(/\{\{[^}]*\}\}/)![0]}” as written: a ${check.check === "ariaSnapshot" ? "structure snapshot" : "URL pattern"} does not fill placeholders, so no page can match it. The test needs the value itself or a pattern.`;
     // An exact-text check on the element found by another text can never pass (paid L4 shop-3 WEB-053: the text "$52.00" must read "$50.75").
@@ -243,7 +248,48 @@ export function ownCheckFault(spec: TestSpec, attempts: ReadonlyArray<{ outcome:
     if (check?.action === "assert" && check.check === "exactText" && byText && !norm(String(check.expected ?? "")).includes(norm(byText)))
         return `The check finds the element by its text “${byText.slice(0, 80)}” and then expects its whole text to be “${String(check.expected).slice(0, 80)}”: no element can be both, so no page can pass it.`;
     const opened = new Set(spec.steps.flatMap((s) => (s.action === "navigate" ? [decoded(s.url).replace(ORIGIN, "").split(/[?#]/)[0]!] : [])));
-    const missing = (a: (typeof failed)[number]) => a.requests.find((r) => r.own && r.method.toUpperCase() === "GET" && r.status === 404 && opened.has(r.path.split(/[?#]/)[0]!));
+    // A check that expects a refusal, on a page that answered a refusal itself: access was refused, only the page's words differ.
+    const wantsRefusal = check?.action === "assert" && REFUSAL.test(`${check.description ?? ""} ${String(check.expected ?? "")} ${check.locator?.value ?? ""}`);
+    const missing = (a: (typeof failed)[number]) => a.requests.find((r) => r.own && r.method.toUpperCase() === "GET" && (r.status === 404 || (wantsRefusal && (r.status === 401 || r.status === 403))) && opened.has(r.path.split(/[?#]/)[0]!));
     const page = failed.every(missing) ? missing(failed[0]!) : undefined;
-    return page ? `The page the test opened, GET ${page.path}, answered 404 in every failed attempt: the application has no such page, so the check never saw the page it was written for. The test needs the application's own address for it.` : undefined;
+    if (page?.status === 404) return `The page the test opened, GET ${page.path}, answered 404 in every failed attempt: the application has no such page, so the check never saw the page it was written for. The test needs the application's own address for it.`;
+    return page ? `The page the test opened, GET ${page.path}, answered ${page.status} in every failed attempt: the access was refused, as the check expects, so the failure is about how the page words the refusal, not about access. The test needs the application's own page and words for it.` : undefined;
+}
+
+const REFUSAL = /\b40[13]\b|not allowed|forbidden|denied|refused|unauthori[sz]ed/i;
+
+/** The actions a test title can be about, each with the words a step that does it carries. */
+const ACTIONS: ReadonlyArray<{ word: string; title: RegExp; does: RegExp; method?: string }> = [
+    { word: "delete", title: /\bdelet(?:e|es|ed|ing)\b/i, does: /\bdelet/i, method: "DELETE" },
+    { word: "remove", title: /\bremov(?:e|es|ed|ing)\b/i, does: /\bremov/i, method: "DELETE" },
+    { word: "archive", title: /\barchiv(?:e|es|ed|ing)\b/i, does: /\barchiv/i },
+];
+
+/**
+ * Why a web test's checks never saw what it is about: its title names an action (delete, remove, archive) that none of its steps does.
+ * A step does it when it presses, ticks or picks a control named for it, opens an address naming it, or sends the matching request. A
+ * control named after text the test itself typed (a note titled "Delete me") is that text, not the action.
+ */
+export function actionNeverDone(spec: TestSpec): string | undefined {
+    if (spec.kind !== "web") return undefined;
+    const typed = new Set(spec.steps.flatMap((s) => (s.action === "fill" ? [norm(s.value)] : [])));
+    const named = (l: unknown) => {
+        const v = (l as { value?: string } | undefined)?.value ?? "";
+        return v && !typed.has(norm(v)) ? v : "";
+    };
+    for (const a of ACTIONS) {
+        if (!a.title.test(spec.title)) continue;
+        const done = spec.steps.some((s) =>
+            s.action === "click" || s.action === "check" || s.action === "select" || s.action === "press"
+                ? a.does.test(named(s.locator)) || (s.action === "select" && a.does.test(s.value))
+                : s.action === "navigate"
+                  ? a.does.test(s.url)
+                  : s.action === "request"
+                    ? s.method === a.method || a.does.test(s.path)
+                    : s.action === "useBlock" || s.action === "condition",
+        );
+        if (!done)
+            return `The test’s title (“${spec.title.slice(0, 120)}”) is about the ${a.word} action, but none of its steps does it: no step presses a control, opens an address or sends a request to ${a.word}. Its checks never saw the result of that action, so their failure says nothing about it.`;
+    }
+    return undefined;
 }

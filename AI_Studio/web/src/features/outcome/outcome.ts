@@ -4,6 +4,7 @@
  * everywhere (`outcomeCounts`): the tree's real pages. Requirement areas are counted apart, and addresses that failed to load are one
  * number, `notOpened`.
  */
+import { friendlyJobErrors } from "../../lib/labels.js";
 import { outcomeCounts, type CaseOutcome, type CaseOutcomeCounts, type CaseOutcomeCase, type CaseOutcomePage, type CaseOutcomePriority, type CaseOutcomeRun, type CaseOutcomeTreeNode, type CaseOutcomeType } from "../../../../src/platform/case-outcome-types.js";
 
 export type { CaseOutcome, CaseOutcomeCounts, CaseOutcomeCase, CaseOutcomePage, CaseOutcomePriority, CaseOutcomeRun, CaseOutcomeTreeNode, CaseOutcomeType };
@@ -125,6 +126,8 @@ export const countsLine = (c: CaseOutcomeCounts["counts"]): string => [plural(c.
 /** The one note about addresses that failed to load; null when every address opened. */
 export const notOpenedLine = (n: number): string | null => (n > 0 ? `${plural(n, "address", "addresses")} could not be opened` : null);
 
+const lowerFirst = (t: string) => (/^AI\b/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1));
+
 /** What the newest run's state means for the report; null when it finished (nothing to say). */
 export function lastRunNote(runs: CaseOutcomeRun[]): string | null {
     const last = runs[0];
@@ -132,7 +135,11 @@ export function lastRunNote(runs: CaseOutcomeRun[]): string | null {
     const kept = `${plural(last.addedPages, "page")} and ${plural(last.addedCases, "test case")}`;
     if (last.status === "running") return "A run is still running. New pages and test cases appear here as it finds them.";
     if (last.status === "stopped") return `The last run was stopped. It kept the ${kept} it found before then.`;
-    if (last.status === "failed") return `The last run did not finish. It kept the ${kept} it found before then.`;
+    if (last.status === "failed") {
+        // Why, in the Runs tab's words, so the reason is where people look (fresh review a6).
+        const why = friendlyJobErrors(last.reason)[0];
+        return `The last run did not finish${why ? `: ${lowerFirst(why.title)}. ${why.body}` : "."} It kept the ${kept} it found before then.`;
+    }
     return null;
 }
 

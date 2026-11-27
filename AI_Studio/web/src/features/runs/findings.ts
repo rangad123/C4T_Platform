@@ -9,6 +9,7 @@
  * and the likely cause with its label. The page only orders and shows them: Confirmed first by severity, then the ones a person must
  * review, then the rest folded by state.
  */
+import type { IssueLink } from "../integrations/types.js";
 
 export type CaptureState = "captured" | "observed_only";
 export type Independence = "independent" | "state_dependent" | "not_run" | "not_on_clean_state";
@@ -60,6 +61,8 @@ export interface FindingReview {
     stateRank: number;
     /** The verdicts the lifecycle lets a person give from this state. */
     personMay: { confirm: boolean; notABug: boolean };
+    /** The issue it was filed as; older answers lack it. */
+    issue?: IssueLink | null;
 }
 
 /** One stored finding (src/platform/candidate-finding-store.ts CandidateFindingRecord). */

@@ -268,8 +268,9 @@ export function registerAgentInputRoutes(ctx: RouteCtx): void {
             cleanupAfter: cleanup.getEnabled(id) ?? true,
             requirements: { active },
             agents: agents ? { ids: agents.agents, names: agents.agents.map((a) => agentById(a)?.name ?? a), source: agents.source } : null,
-            // Only a saved choice makes an input mandatory (a project with none explores as before and is never refused).
-            missing: agents?.source === "chosen" ? missingInputs(await agentsThatRun(repo, id, agents.agents), { openApiUrl, capturedApis: agents.agents.includes("api") && capturedApisFor(repo, id, latest?.url as string | undefined) }) : [],
+            // Only a saved choice makes an input mandatory (a project with none explores as before and is never refused). Every chosen agent
+            // runs on its own from the Workspace (one run = one agent, D1), so what each one misses is said here as its Workspace card says it.
+            missing: agents?.source === "chosen" ? missingInputs(agents.agents, { openApiUrl, capturedApis: agents.agents.includes("api") && capturedApisFor(repo, id, latest?.url as string | undefined) }) : [],
         };
     };
 

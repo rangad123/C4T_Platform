@@ -123,7 +123,7 @@ export function GithubCodeCard({ canManage }: { canManage: boolean }) {
                 <span className="spacer" />
                 {id && host.data && <Badge tone={c ? "success" : "neutral"}>{c ? "Connected" : "Not connected"}</Badge>}
             </div>
-            <p className="t-secondary">Connect a project’s repository. Each pull request then gets the tests its change calls for, on Runs, After a deploy.</p>
+            <p className="t-secondary">Connect a project’s repository. Each pull request then gets the tests its change calls for; the results show on the project’s After a deploy page.</p>
             {list.length === 0 ? (
                 <p className="t-meta">{projects.loading ? "Loading projects…" : "Create a project first."}</p>
             ) : (
@@ -149,7 +149,7 @@ export function GithubCodeCard({ canManage }: { canManage: boolean }) {
                                 <span className="t-meta">· pull request feedback {c.feedback ? "on" : "off"}</span>
                             </p>
                             <p className="t-meta">
-                                Pull request lines show on the project’s <a href={routes.runs(id, "deploys")}>Runs, After a deploy</a>.
+                                Pull request lines show on the project’s <a href={routes.runs(id, "deploys")}>After a deploy</a> page.
                             </p>
                             {canManage && (
                                 <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>

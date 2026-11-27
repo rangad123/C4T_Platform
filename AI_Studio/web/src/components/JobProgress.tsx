@@ -71,7 +71,7 @@ export function JobProgress({ job: polled, onChanged }: { job: Job; onChanged?: 
                 </p>
             )}
 
-            <LiveLine state={stream.state} latest={stream.latest} />
+            <LiveLine state={stream.state} latest={stream.latest} queued={job.status === "QUEUED"} />
 
             {caseAgent ? (
                 <CaseStages job={job} />

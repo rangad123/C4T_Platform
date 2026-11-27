@@ -184,7 +184,7 @@ function InputsCard({ projectId, data, justSaved, onSaved }: { projectId: string
                                     OpenAPI document URL {needs("openApiUrl").length > 0 && <Badge tone="warning">Needed</Badge>}
                                 </label>
                                 <p className="hint" id="ai-oas-hint">
-                                    {needs("openApiUrl").length > 0 ? `The API documentation. The ${needs("openApiUrl").map((m) => m.agentName).join(" and the ")} cannot explore without it.` : "The API documentation. Found automatically if left empty."}
+                                    {needs("openApiUrl").length > 0 ? `The API documentation. The ${needs("openApiUrl").map((m) => m.agentName).join(" and the ")} cannot explore without it.` : "The API documentation. Optional for the chosen agents: when it is left empty, the usual addresses such as /openapi.json are tried."}
                                 </p>
                                 <input id="ai-oas" className="input" type="url" value={openApiUrl} disabled={!canEdit} aria-describedby="ai-oas-hint" placeholder="https://example.com/openapi.json" onChange={(e) => setOpenApiUrl(e.target.value)} />
                             </div>

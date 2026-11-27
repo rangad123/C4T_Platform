@@ -20,6 +20,7 @@ import type { ScriptRun } from "../src/engine/validation/runner.js";
 import { classifyFailedRun } from "../src/engine/validation/validator.js";
 import { confidenceScore } from "../src/engine/findings/score.js";
 import { judgeAttempts } from "../src/platform/findings/verify-service.js";
+import { actionNeverDone, ownCheckFault } from "../src/engine/findings/expectation.js";
 
 // rbac L4 trial 4, WEB-019: the C11 stored-injection page check made by security/functional.ts storedInjectionSpec.
 const web019 = TestSpecSchema.parse({
@@ -238,5 +239,32 @@ describe("L12: written values never hold the run's secrets", () => {
         const before = JSON.stringify(spec);
         expect(scrubSecretValues(spec, ["not-in-the-test"])).toBe(0);
         expect(JSON.stringify(spec)).toBe(before);
+    });
+});
+
+// Free-G item 5: a check that never exercised what it is about is the test's own step.
+describe("a check that never exercised the stated behaviour is not an application defect", () => {
+    const people = (status: number, check = { action: "assert", check: "visible", locator: { by: "text", value: "Not allowed" }, description: 'A non-admin opening the People page sees "Not allowed" (403)' }) =>
+        ownCheckFault(TestSpecSchema.parse({ testId: "WEB-067", title: "As stated: rule", kind: "web", category: "Access", type: "security", priority: "medium", steps: [{ action: "navigate", url: "/people", description: "Open /people" }, check], expectedResults: ["Not allowed"] }), [
+            { outcome: "failed", failedStep: 2, requests: [{ method: "GET", path: "/people", status, own: true }] },
+        ]);
+    it("a guessed address that answered 403 to a check expecting a refusal is the test's own step", () => {
+        expect(people(403)).toMatch(/answered 403.*not about access/);
+        expect(people(404)).toMatch(/answered 404/);
+    });
+    it("a page that opened (200), or a 403 on a check that expects no refusal, is still judged as the application's", () => {
+        expect(people(200)).toBeUndefined();
+        expect(people(403, { action: "assert", check: "visible", locator: { by: "text", value: "People" }, description: "The People list is shown" })).toBeUndefined();
+    });
+    const spec = (title: string, steps: unknown[]) => TestSpecSchema.parse({ testId: "WEB-001", title, kind: "web", category: "Notes", type: "workflow", priority: "high", steps, expectedResults: ["x"] });
+    const fill = { action: "fill", locator: { by: "label", value: "Title" }, value: "Delete me {{unique}}" };
+    const check = { action: "assert", check: "visible", locator: { by: "role", role: "heading", value: "Notes" } };
+    it("a delete test whose only Delete-named control is the note it typed never deletes", () => {
+        expect(actionNeverDone(spec("Deleting a note returns to the list", [fill, { action: "click", locator: { by: "role", role: "link", value: "Delete me {{unique}}" } }, check]))).toMatch(/delete action, but none of its steps does it/);
+    });
+    it("pressing Delete, a DELETE request or a test not about deleting is not flagged", () => {
+        expect(actionNeverDone(spec("Deleting a note returns to the list", [fill, { action: "click", locator: { by: "role", role: "button", value: "Delete note" } }, check]))).toBeUndefined();
+        expect(actionNeverDone(spec("Owner deletes a note", [{ action: "request", method: "DELETE", path: "/api/notes/n1" }, check]))).toBeUndefined();
+        expect(actionNeverDone(spec("Saving a note returns to the list", [fill, check]))).toBeUndefined();
     });
 });

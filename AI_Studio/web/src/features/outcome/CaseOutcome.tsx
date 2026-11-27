@@ -1,6 +1,7 @@
 import { ChevronRight, CircleSlash, Download, LoaderCircle, Network, OctagonPause, TriangleAlert, X } from "lucide-react";
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { EmptyState } from "../../components/ui";
+import { friendlyJobErrors } from "../../lib/labels";
 import { OutcomeTree } from "./OutcomeTree";
 import { PRIORITY_LABEL, TYPE_LABEL, buildTree, casesForNode, lastRunNote, nodeCaseCounts, notOpenedLine, outcomeCounts, plural, summaryLine, unplacedCases, type CaseOutcome as Outcome, type CaseOutcomeCase } from "./outcome";
 import "./outcome.css";
@@ -162,6 +163,12 @@ export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, t
     );
 }
 
+/** "The AI’s answers could not be used: …" with a space after, or nothing when no reason was stored. */
+function failedWhy(reason: string | undefined): string {
+    const why = friendlyJobErrors(reason)[0];
+    return why ? `${why.title}: ${why.body} ` : "";
+}
+
 function Empty({ outcome, actions }: { outcome: Outcome; actions?: ReactNode }) {
     const last = outcome.runs[0];
     if (last?.status === "running")
@@ -173,6 +180,8 @@ function Empty({ outcome, actions }: { outcome: Outcome; actions?: ReactNode }) 
     if (last)
         return (
             <EmptyState icon={OctagonPause} title={last.status === "stopped" ? "The run was stopped before it found a page" : "The run ended before it found a page"} actions={actions}>
+                {/* Why it ended, in the Runs tab's words (fresh review a6). */}
+                {last.status === "failed" && failedWhy(last.reason)}
                 Explore again to build the map of the application and write its test cases.
             </EmptyState>
         );

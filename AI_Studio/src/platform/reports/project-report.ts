@@ -24,6 +24,7 @@ import type { FindingView } from "../../engine/findings/view.js";
 import { confidenceScore, label, severityOf } from "../../engine/findings/score.js";
 import { CandidateFindingStore } from "../candidate-finding-store.js";
 import { fromCandidate } from "../findings/adapters.js";
+import { findingAnswers } from "../findings/report-facts.js";
 import { buildFindingReport, REPORT_FIELD_LABEL, REPORT_FIELDS, type FindingReport } from "../issues/content.js";
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
@@ -80,7 +81,7 @@ function seconds(ms: number): string {
     return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`;
 }
 
-export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: string, now = new Date(), causeOf: (members: FindingView[]) => Promise<RootCause> = (members) => rootCause({ members })): Promise<ProjectReportData | undefined> {
+export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: string, now = new Date(), causeOf: (members: FindingView[]) => Promise<RootCause> = (members) => rootCause({ members }), accounts?: ReadonlyMap<string, string>): Promise<ProjectReportData | undefined> {
     const project = repo.getProject(projectId);
     if (!project) return undefined;
     // Judged on the steps a test really has, reusable steps included.
@@ -154,6 +155,8 @@ export async function gatherReport(repo: Repo, store: ArtifactStore, projectId: 
             area: t?.suite,
             environment: { appUrl: app0?.url as string | undefined, appVersion: r.appVersion },
             rootCause: r.rootCause ?? (await causeOf([view])),
+            answers: await findingAnswers(repo.db, store, r),
+            ...(accounts ? { accounts } : {}),
         });
         confirmed.push({ rank: SEVERITIES.indexOf(severity), report });
     }

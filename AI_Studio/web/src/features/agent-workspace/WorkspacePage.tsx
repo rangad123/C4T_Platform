@@ -8,6 +8,7 @@ import { friendlyError } from "../../lib/labels";
 import { useFetch } from "../../lib/hooks";
 import { routes } from "../../lib/router";
 import { ProjectTabs } from "../../pages/ProjectOverview";
+import { QualityCard } from "../dashboard/QualityCard";
 import { sec } from "../security/security";
 import { AgentAvatar } from "../testing-agents/testing-agents";
 import { SetupChecklist } from "../workspace/SetupChecklist";
@@ -66,6 +67,8 @@ export function Workspace({ id, p, needsSecrets }: { id: string; p: ProjectDetai
                             </div>
                         </section>
                         <Flow projectId={id} agents={agents} />
+                        {/* Confirmed bugs, regressions, stability and pull requests over the last weeks (Phase 6); hidden until there is history. */}
+                        <QualityCard projectId={id} />
                     </>
                 )}
             </div>
@@ -149,7 +152,10 @@ function Flow({ projectId, agents }: { projectId: string; agents: WorkspaceAgent
                     </li>
                 )}
             </ol>
-            <p className="t-meta">Nothing moves by itself: each agent runs when you start it.</p>
+            <p className="t-meta">
+                Nothing moves by itself: each agent runs when you start it, on a timetable from <a href={routes.runs(projectId, "schedules")}>Schedules</a>, or when your pipeline reports a new version from{" "}
+                <a href={routes.runs(projectId, "deploys")}>After a deploy</a>, where pull request lines show too.
+            </p>
         </section>
     );
 }

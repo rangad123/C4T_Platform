@@ -72,7 +72,7 @@ export function TriggersPanel({ projectId, reloadKey = 0 }: { projectId: string;
                         />
                     )}
                     {revoked.length > 0 && <p className="t-meta" style={{ padding: "0 20px 14px" }}>{revoked.length} revoked {revoked.length === 1 ? "token no longer works" : "tokens no longer work"}.</p>}
-                    {active.length > 0 && <p className="t-meta" style={{ padding: "0 20px 14px" }}>A token can start one run every {list.data.minSecondsBetweenRuns} seconds. Runs it starts are marked “After a deploy” in Runs.</p>}
+                    {active.length > 0 && <p className="t-meta" style={{ padding: "0 20px 14px" }}>A token can start one run every {list.data.minSecondsBetweenRuns} seconds. Runs it starts are marked “After a deploy”.</p>}
                 </>
             )}
         </section>

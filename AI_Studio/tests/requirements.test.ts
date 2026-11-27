@@ -111,6 +111,13 @@ describe("requirement parsing", () => {
         expect(reqs.map((r) => [r.id, r.text])).toEqual([["1.1", "Visitors can see the product list."], ["1.2", "The cart needs a signed-in customer."], ["2.10", "Signing out ends the session."]]);
     });
 
+    it("a document's introduction about itself is not a requirement (the practice store's REQUIREMENTS.md header, a5)", () => {
+        const doc = "# Store — Requirements\n\nVersion: 1.0\n\nThis document states how the Store must behave. Each requirement has an id and sits on one line.\n\n## 1 General\n\n1.1 Every page must show the banner at the top.\n";
+        expect(parseRequirementsDeterministic(doc).map((r) => [r.id, r.text])).toEqual([["1.1", "Every page must show the banner at the top."]]);
+        // A requirement that only mentions a document is kept.
+        expect(parseRequirementsDeterministic("The invoice document must show the total.").map((r) => r.text)).toEqual(["The invoice document must show the total."]);
+    });
+
     it("falls back to the deterministic result when no model is configured", async () => {
         const reqs = await parseRequirements(ctxWith(unavailableLlmClient("no key")), MD);
         expect(reqs.map((r) => r.id)).toEqual(["REQ-1", "REQ-2", "REQ-3", "REQ-4"]);

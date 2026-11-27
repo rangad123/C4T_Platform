@@ -9,6 +9,7 @@ import { projectRootCause } from "../code-host/source.js";
 import type { FindingState } from "../../engine/findings/lifecycle.js";
 import { CandidateFindingStore, type CandidateFindingRecord } from "../candidate-finding-store.js";
 import { fromCandidate } from "../findings/adapters.js";
+import { accountSignIns, findingAnswers } from "../findings/report-facts.js";
 import { buildFindingReport, buildIssueDraft, findingIssueDraft } from "../issues/content.js";
 import { TrackerError } from "../issues/http.js";
 import { IntegrationStore, providerFor, splitSettings } from "../issues/store.js";
@@ -241,6 +242,8 @@ export function registerIntegrationRoutes(ctx: RouteCtx): void {
                 evidenceUrl,
                 // The cause verification kept on the group, else the repository's deterministic answer. No AI call is made here.
                 rootCause: members.find((m) => m.rootCause)?.rootCause ?? (await projectRootCause(p, id, views)),
+                answers: await findingAnswers(repo.db, p.store, r),
+                accounts: accountSignIns(repo, new SecretBox(p.config.dataDir, p.config.SECRET_KEY), id),
             });
             const draft = findingIssueDraft(report, evidenceUrl);
             try {

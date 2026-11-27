@@ -25,19 +25,23 @@ export function RunsPage({ id }: { id: string }) {
     // A Test Case Generation project's runs each add to its one tree: only its runs and their schedules (founder 2026-11-19, P7.2, O6).
     const choice = useFetch<ProjectAgents>(`/projects/${id}/testing-agents`);
     const caseAgent = choice.data ? choice.data.caseAgent === true : choice.loading ? undefined : false;
-    // An Agent Workspace project: each agent's runs are on its own page, so only Schedules is here; everything else opens the Workspace (W3 review M4).
+    // An Agent Workspace project: each agent's runs are on its own page, so only Schedules and After a deploy are here; everything else opens the Workspace (W3 review M4).
     const workspace = project.data && choice.data ? hasWorkspace(projectShape(project.data).testingModes, choice.data) : project.loading || choice.loading ? undefined : false;
     // Its runs live on the Test Case Generation agent's page now (Agent Workspace); only its Schedules stay here.
     // Only while the address is still this place's: a link away changes the route before this page unmounts, and must not be redirected.
     const here = parts[2] === "runs" && !parts[3];
-    const moved = section === "schedules" || !here ? null : workspace ? routes.project(id) : caseAgent === true && workspace === false ? routes.projectAgent(id, "test-generation", "runs") : null;
+    const moved = section === "schedules" || section === "deploys" || !here ? null : workspace ? routes.project(id) : caseAgent === true && workspace === false ? routes.projectAgent(id, "test-generation", "runs") : null;
     useEffect(() => {
         if (moved) location.replace(moved);
     }, [moved]);
     if (caseAgent === undefined || workspace === undefined || moved) return <ListSkeleton rows={3} />;
     if (workspace) {
-        const only: HubSection[] = [{ key: "schedules", label: "Schedules", hint: "Run an agent on a timetable", render: () => <ProjectSchedule id={id} section="schedules" agentId={query.get("agent")} workspace /> }];
-        return <ProjectHub id={id} place="runs" title="Schedules" subtitle="Run a testing agent on a timetable. Each run is that agent’s, with its own checks only, and its results are on the agent’s page." sections={only} current="schedules" hrefOf={() => routes.runs(id, "schedules")} />;
+        // Runs that start by themselves; each agent's own runs are on its page. After a deploy also holds the pull request lines.
+        const only: HubSection[] = [
+            { key: "schedules", label: "Schedules", hint: "Run an agent on a timetable", render: () => <ProjectSchedule id={id} section="schedules" agentId={query.get("agent")} workspace /> },
+            { key: "deploys", label: "After a deploy", hint: "Run when your pipeline says a new version is out; pull request lines", render: () => <ProjectSchedule id={id} section="deploys" /> },
+        ];
+        return <ProjectHub id={id} place="runs" title="Schedules" subtitle="Run a testing agent on a timetable or after a deploy. Each run is that agent’s, with its own checks only, and its results are on the agent’s page." sections={only} current={section === "deploys" ? "deploys" : "schedules"} hrefOf={(k) => routes.runs(id, k as RunsSection)} />;
     }
     if (caseAgent) {
         const tcg: HubSection[] = [

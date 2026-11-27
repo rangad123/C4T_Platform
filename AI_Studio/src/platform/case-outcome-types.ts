@@ -13,6 +13,8 @@ export interface CaseOutcomeRun {
     status: CaseOutcomeRunStatus;
     addedPages: number;
     addedCases: number;
+    /** Why a failed run stopped (the job's error, as the Runs tab shows it); absent otherwise. */
+    reason?: string;
 }
 
 export interface CaseOutcomePage {

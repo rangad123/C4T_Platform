@@ -5,6 +5,7 @@ import { friendlyError, isActive } from "../../lib/labels";
 import { BadgeKey } from "../../components/Tooltip";
 import { useFetch } from "../../lib/hooks";
 import { routes, type AgentTab } from "../../lib/router";
+import { CandidateFindings } from "../runs/CandidateFindings";
 import { RunDetail } from "../runs/RunDetail";
 import { RelTime } from "../runs/RunTime";
 import type { AgentDetail, AgentId } from "../testing-agents/testing-agents";
@@ -27,7 +28,18 @@ export function AgentPage({ id, agentId, tab, runId }: { id: string; agentId: st
     const body = (render: () => JSX.Element) => () =>
         missing ? <ErrorState error={friendlyError(ws.error?.message ?? "This testing agent is not one of this project's agents.")} onRetry={ws.error ? () => void ws.reload() : undefined} /> : !a ? <ListSkeleton rows={3} /> : render();
     const sections: HubSection[] = [
-        { key: "outcome", label: "Outcome", hint: "What this agent found: its result only", render: body(() => (view ? <view.Outcome projectId={id} /> : <NotShownYet name={a!.name} />)) },
+        {
+            key: "outcome",
+            label: "Outcome",
+            hint: "What this agent found: its result only",
+            render: body(() => (
+                <div className="stack">
+                    {view ? <view.Outcome projectId={id} /> : <NotShownYet name={a!.name} />}
+                    {/* What a check agent found, to Confirm, call Not a bug or file as an issue; shown only when it found any. */}
+                    {agentId !== "test-generation" && <CandidateFindings projectId={id} agentId={agentId} explores={false} />}
+                </div>
+            )),
+        },
         {
             key: "runs",
             label: "Runs",

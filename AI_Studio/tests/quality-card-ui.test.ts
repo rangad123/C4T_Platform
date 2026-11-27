@@ -224,3 +224,21 @@ describe("at phone width", () => {
         await page.setViewportSize({ width: 1200, height: 900 });
     }, 60_000);
 });
+
+// Fresh review steps 7 and 8: an Agent Workspace project keeps its quality card and its After a deploy page within reach.
+describe("an agent project (the Workspace)", () => {
+    it("shows the quality card on the Workspace, and its link opens After a deploy with the pull request lines", async () => {
+        platform.db.run("UPDATE projects SET testing_modes = ? WHERE id = ?", JSON.stringify(["agent"]), projectId);
+        const chose = await fetch(`${BASE}/api/projects/${projectId}/testing-agents`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ agents: ["security"] }) });
+        expect(chose.status).toBe(200);
+        await page.goto(`${BASE}/#/projects/${projectId}`);
+        await pwExpect(page.getByTestId("workspace")).toBeVisible({ timeout: 20_000 });
+        await pwExpect(page.getByTestId("workspace").getByTestId("quality-card")).toBeVisible({ timeout: 20_000 });
+        await shot('[data-testid="workspace"]', "workspace-quality.png");
+        await page.getByTestId("workspace-flow").getByRole("link", { name: "After a deploy" }).click();
+        await pwExpect(page.getByTestId("selection-prs").locator('[data-pr="42"]')).toBeVisible({ timeout: 20_000 });
+        await page.waitForTimeout(500);
+        expect(page.url()).toContain(`#/projects/${projectId}/runs?section=deploys`);
+        await shot('[data-testid="selection-prs"]', "workspace-after-deploy.png");
+    }, 90_000);
+});

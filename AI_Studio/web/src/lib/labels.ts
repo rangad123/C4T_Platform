@@ -185,6 +185,11 @@ export function phaseText(phase: PhaseKey, state: PhaseState, c: Counters): { ti
 }
 
 /** Overall progress 0–100 from phase states. */
+/** A going run on an agent's card: "Running n%", or, while nothing has started it (no worker, or the person's runner is off), what it waits for (fresh review a8). */
+export function runningLabel(job: Pick<Job, "progress" | "status">): string {
+    return job.status === "QUEUED" ? "Waiting for a worker or runner" : `Running ${progressPercent(job)}%`;
+}
+
 export function progressPercent(job: Pick<Job, "progress" | "status">): number {
     if (!isActive(job.status)) return 100;
     const weights: Record<PhaseState, number> = { done: 1, skipped: 1, failed: 1, running: 0.5, pending: 0 };
@@ -277,6 +282,9 @@ export function friendlyError(message: string | null | undefined): FriendlyError
     }
     if (/^Nothing ran: /.test(m)) return { title: "Nothing ran", body: `${m.replace(/^Nothing ran: /, "").replace(/^./, (c) => c.toUpperCase())} Only approved versions run. Once a Project Admin approves a test, run it again.` };
     // The pages show the run's own facts (how many tests finished) when they have them; this is what is always true.
+    // The AI's answer in a form the engine could not read (llm/provider.ts): the model's problem, said without the parser's words.
+    if (/The AI's answer could not be used|no structured output in the expected format/i.test(m))
+        return { title: "The AI’s answers could not be used", body: "The AI model answered in a form AI Studio could not read, even after asking again. Run it again; if it keeps happening, choose another AI model in Settings." };
     if (/^Cancelled$/i.test(m)) return { title: "This run was stopped", body: "Tests that had not finished kept the results they had before. You can start a new run at any time." };
     if (/Worker lost|lease expired/i.test(m)) return { title: "The run was interrupted", body: "The server restarted or stopped while working. Start it again." };
     if (/No tests could be generated/i.test(m)) return { title: "No tests could be created", body: "We couldn’t build any tests for this application. Try adding a test account, or narrow the scope." };

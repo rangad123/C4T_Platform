@@ -43,15 +43,12 @@ If you can, test a staging copy of your application (a spare copy used for testi
 ## Start in 10 minutes
 
 1. Open the platform in your browser. On your own computer the address is usually `http://127.0.0.1:4000`. On a shared server, your admin gives you the address.
-2. On the Projects page choose **Create a project** (on your first visit) or **New project**. Give it a name, choose **Web** and **AI agent**, type the **Application URL** (the address of the site you want to test), and choose **Create project**.
-3. If the site has a sign-in page, add a test account in the project's **Settings**, then **Sign-in**. The platform can then see what is behind the sign-in page. You can also do this later and explore again.
-4. On the project's **Dashboard** choose **Start exploring**. The Explore page has the address, an optional **Focus** such as "search and checkout only", and **How much to explore**. Choose **Start exploring** again. The AI looks around your application. Nothing is created or run yet. **Stop exploring** is always visible.
-5. Read the plan on the project's Dashboard. It says what was found and what the platform will create, for example "We found 4 pages and 2 API endpoints. We will create about 18 tests." (An API endpoint is a place where programs, not people, talk to your app.) Open **Edit the plan** to switch kinds of test on or off, or to leave out single ideas. The numbers change as you edit.
-6. Choose **Create the tests**. Or choose **Discard the plan** to forget it.
-7. Watch **Creating your tests**. Each test appears with its status. This takes a few minutes, and you can leave the page and come back.
-8. Read the result on the **Dashboard**. Each test is **Passing**, **Failing**, **Needs a look** or **Not run yet**. Expect a few **Needs a look** on a first run. Real sites nearly always have small problems, such as a missing security setting. That shows the checks work.
-9. Choose **View tests** on the Dashboard, then open one test that is not passing. The page says which step failed, what was expected and what came back.
-10. Choose **Run** to run the tests again. The **Next steps** list on the Dashboard then suggests what to do: set a schedule, add sign-in details, connect a runner.
+2. On the Projects page choose **Create a project** (on your first visit) or **New project**. Give it a name, choose **Web** and **AI agent**, type the **Application URL** (the address of the site you want to test), keep or change the testing agents, and choose **Create project**.
+3. If the site has a sign-in page, add a test account in the project's **Settings**, then **Sign-in**. The agents can then see what is behind the sign-in page. Requirements, and the **OpenAPI document URL** the API Testing Agent needs, go on the **Requirements** tab.
+4. The project opens on its **Workspace**: one card per agent, with what it does, its status (**Not run yet**, **Running**, **Done**, **Needs input**, or **Waiting for a worker or runner** while nothing has started the run yet) and its last outcome in one line.
+5. Choose **Run** on an agent's card. Each run is that agent's alone, with its own checks only. The **Test Case Generation** agent explores the site and writes test cases; the check agents (API, Accessibility, Security, Responsive UI, UX, Performance) test it.
+6. Choose **Open** on the card. **Outcome** shows that agent's result only, and, for a check agent, **Findings to check**: choose **Confirm**, **Not a bug** with a reason, or **File issue** once an issue tracker is connected. **Runs** lists that agent's runs; **Settings** its own defaults.
+7. Back on the Workspace, **How work moves between agents** says what the agents share (one memory of the site) and what you move by hand (the test case workbook, security evidence). Its links open **Schedules** (run an agent on a timetable) and **After a deploy** (run when your pipeline reports a new version; pull request lines show there too). The **Quality** card below appears once there is history.
 
 ---
 
@@ -61,12 +58,12 @@ The left sidebar has **Projects** (your applications), **Settings** (the platfor
 
 Inside a project, its places appear as tabs under the project's name. Which tabs a project has depends on how it is tested (a **Security assessment** tab is added when the project includes it):
 
-- A project tested by the **AI agent** has **Dashboard**, **Runs**, **Requirements** and **Settings**.
+- A project tested by the **AI agent** has **Workspace**, **Requirements** and **Settings** (an older one with no testing agents chosen keeps **Dashboard** and **Runs**).
 - A **code** project has **Dashboard**, **Requirements**, **Test cases**, **Test scripts**, **Test suites**, **Runs** and **Settings**. A project made with both ways of testing, before a project had one, has the same tabs as a code project.
 
 | Place | The question it answers |
 |---|---|
-| **Dashboard** | Is everything healthy, and what needs me? |
+| **Dashboard** | Is everything healthy, and what needs me? (An AI agent project has the **Workspace** instead: each agent's status and outcome.) |
 | **Requirements** | What must the application do? For an AI agent project, also what the agents need: sign-in details, API access and the OpenAPI document. |
 | **Test cases** | What do we check, in writing? Each test case has a title, steps, what should happen and a requirement, and is **Automated** (a tool can do it) or **Manual** (a person does it). |
 | **Test scripts** | What runs? Every runnable test, with search and filters, its review, and the reusable steps, shared elements and helpers scripts share. |
@@ -76,7 +73,7 @@ Inside a project, its places appear as tabs under the project's name. Which tabs
 
 A place with several parts shows a row of sections under its title. In **Test scripts**, one search box finds reusable steps, shared elements and helpers by name.
 
-Test scripts has the buttons you will use all the time: **Run** (choose what to run and where), **New test script** (the one menu for making a script), **Import** (scripts from a file, Maestro flows or Git) and **More actions** (export, check other browsers). An AI agent project's tests open with **View tests** on its Dashboard. The Projects page also has **New project**. Old bookmarks to earlier pages open the place and section that now holds them.
+Test scripts has the buttons you will use all the time: **Run** (choose what to run and where), **New test script** (the one menu for making a script), **Import** (scripts from a file, Maestro flows or Git) and **More actions** (export, check other browsers). The Projects page also has **New project**. Old bookmarks to earlier pages open the place and section that now holds them.
 
 Words you may not know are underlined with dots. Press one for a one-sentence explanation. Press Escape to close it.
 
@@ -156,7 +153,7 @@ You never need to leave the platform to find out how something works.
 *The AI looks around your application and builds tests for it.*
 
 - **Why you'd use it:** It is the fastest way to a first set of tests.
-- **How:** On an AI agent project's Dashboard choose **Start exploring** (the first time) or **Explore again** (after that). Check the address, give an optional **Focus**, and choose how much to explore. Read the plan, then choose **Create the tests**.
+- **How:** On an AI agent project's **Workspace** choose **Run** on an agent's card. Check the address, give an optional **Focus**, and choose how much to explore. Each run is that agent's, and its result is on the agent's page (**Open**).
 - **Which checks run:** the project's **Testing agents** decide, in **Settings**, then **General**. A new project starts with the API, Accessibility, Security, UX and Test Case Generation agents. Visual changes come with Responsive UI, speed checks with Performance. The load check is asked for per exploration through the API or an AI assistant. The AI screen review is on at **Deep** and **Everything** when the project has the UX agent and your model can read images (screenshots of key pages go to your AI provider); at those levels the Explore page shows an **AI screen review** box, ticked, so you can leave it out for one exploration. Each check is explained in [What the platform checks besides clicks](#what-the-platform-checks-besides-clicks).
 - **What the agents need:** in the project's **Settings**, then **Sign-in**, keep a test account, so the platform can see pages behind a sign-in. For an API that needs a sign-in, add a **Bearer token** (a secret code that lets a program use your API) or OAuth2 details (another way for programs to sign in) there too. The **OpenAPI document URL** (your API's description document) goes on the **Requirements** tab, under **What the agents need**. They are saved only there: exploring uses them and never changes them. The requirements on the Requirements tab are what the AI plans tests from. When an agent needs something that is missing, Explore asks for it first. An exploration started through the API, the command line or an AI assistant that names another API address or OpenAPI document while sign-in details or API credentials are saved is refused (409) with the reason, so saved credentials never go to another site. The Explore page itself has one optional field, a **Focus** such as "search and checkout only", and the choice of how much to explore.
 - **Include API tests that change data:** this is off, because those tests create and delete real records. Turn it on (under **What the agents need**) only for a test environment. Whether the records are removed afterwards is set in **Settings**, then **Test data**.
@@ -348,7 +345,7 @@ You never need to leave the platform to find out how something works.
 *What an exploration found wrong in your application, checked again before it is called a bug.*
 
 - **Why you'd use it:** A finding is a possible bug. The platform replays it from a fresh start before it says **Confirmed**, so you spend your time on the real ones.
-- **How:** Open **Runs** and the exploration's run, or choose the **Bugs confirmed** number on the Dashboard's **Quality** card. Under **Findings to check**, confirmed bugs come first, worst severity first, then those that need a person (**Needs manual review**). The rest are folded by state, for example **Reproduced** or **Candidate**. Each finding shows what was observed, what was expected and where that comes from, how sure the platform is, and **Evidence** (screenshots, requests, console lines). Choose **Confirm**, or **Not a bug** with a reason, and **File issue** once an issue tracker is connected.
+- **How:** In an AI agent project, open the agent's page from the **Workspace** (**Open** on its card): its **Outcome** tab has **Findings to check**. In other projects, open **Runs** and the exploration's run. The **Bugs confirmed** number on the **Quality** card opens the run with the latest one. Under **Findings to check**, confirmed bugs come first, worst severity first, then those that need a person (**Needs manual review**). The rest are folded by state, for example **Reproduced** or **Candidate**. Each finding shows what was observed, what was expected and where that comes from, how sure the platform is, and **Evidence** (screenshots, requests, console lines). Choose **Confirm**, or **Not a bug** with a reason, and **File issue** once an issue tracker is connected; a filed finding then says **Filed as** with the issue's link.
 - **Good to know:** Only a high-confidence finding is labelled **Confirmed**. When you confirm one of medium confidence it reads "Possible ... bug, needs review", and a sentence under it says why. More: [bug-verification.md](features/bug-verification.md).
 
 #### Other browsers and screen sizes
@@ -372,7 +369,7 @@ You never need to leave the platform to find out how something works.
 *Your build pipeline asks the platform to run the tests when a new version goes live.*
 
 - **Why you'd use it:** You test every release without anyone clicking. (A build pipeline is the automatic process that builds and releases your software.)
-- **How:** Open **Runs**, then **After a deploy**. Choose **Create a token**. A deploy token is a secret code your pipeline sends to the platform. It is shown once, and you can revoke it. Give it to the person who runs your pipeline.
+- **How:** Open **Runs**, then **After a deploy** (in an AI agent project: the **After a deploy** link on the Workspace). Choose **Create a token**. A deploy token is a secret code your pipeline sends to the platform. It is shown once, and you can revoke it. Give it to the person who runs your pipeline.
 - **Good to know:** A token can start a run sequence instead of a plain re-run. A token allows one run per 30 seconds, and a busy project answers "busy". The technical details are in the [admin guide](ADMIN_GUIDE.md#8-deploy-trigger). More: [healing-and-triggers.md](features/healing-and-triggers.md).
 
 #### Run sequences
@@ -673,10 +670,10 @@ On a first exploration most of these checks are on by default. Each finding says
 
 #### The quality card
 
-*How the project has done over the last weeks, on its Dashboard.*
+*How the project has done over the last weeks, on its Dashboard or Workspace.*
 
 - **Why you'd use it:** It answers "are we finding bugs, and do they come back?"
-- **How:** Open the project's **Dashboard**. **Quality** shows **Bugs confirmed** (choose the number to open the run with the latest one), **Came back after a fix**, the pass rate of the latest runs, and, when there is something to count, **Workflow steps tried** and **Pull requests checked**. Under them, **Areas that keep failing** and **Unreliable tests to fix**, each a link to the test to look at.
+- **How:** Open the project's **Dashboard** (an AI agent project's **Workspace**). **Quality** shows **Bugs confirmed** (choose the number to open the run with the latest one), **Came back after a fix**, the pass rate of the latest runs, and, when there is something to count, **Workflow steps tried** and **Pull requests checked**. Under them, **Areas that keep failing** and **Unreliable tests to fix**, each a link to the test to look at.
 - **Good to know:** The card appears once the project has run history. More: [change-aware-testing.md](features/change-aware-testing.md).
 
 #### Trends and unreliable tests

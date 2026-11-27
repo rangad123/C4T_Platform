@@ -39,14 +39,28 @@ interface Act {
     onChanged: () => void;
 }
 
+/** The issue a finding was filed as, a link to it in its tracker. */
+function FiledAs({ link }: { link: IssueLink }) {
+    return (
+        <p className="t-meta" data-testid="finding-issue">
+            Filed as{" "}
+            <a href={externalHref(link.url)} target="_blank" rel="noreferrer">
+                {TRACKER_LABEL[link.provider]} {link.externalId}
+                <ExternalLink size={13} aria-hidden />
+                <span className="sr-only"> (opens in a new tab)</span>
+            </a>
+        </p>
+    );
+}
+
 function Actions({ rec, projectId, act }: { rec: FindingRecord; projectId: string; act: Act }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     const [asking, setAsking] = useState(false);
     const [reason, setReason] = useState("");
-    const [filed, setFiled] = useState<IssueLink | null>(null);
+    const [filed, setFiled] = useState<IssueLink | null>(rec.review.issue ?? null);
     const can = actionsOf(rec, act.tracker !== undefined);
-    if (!act.write || !(can.confirm || can.notABug || can.split || can.fileIssue)) return null;
+    if (!act.write || !(can.confirm || can.notABug || can.split || can.fileIssue)) return filed ? <FiledAs link={filed} /> : null;
 
     async function run(go: () => Promise<unknown>): Promise<boolean> {
         setBusy(true);
@@ -94,16 +108,7 @@ function Actions({ rec, projectId, act }: { rec: FindingRecord; projectId: strin
                     </Button>
                 )}
             </div>
-            {filed && (
-                <p className="t-meta" data-testid="finding-issue">
-                    Filed as{" "}
-                    <a href={externalHref(filed.url)} target="_blank" rel="noreferrer">
-                        {TRACKER_LABEL[filed.provider]} {filed.externalId}
-                        <ExternalLink size={13} aria-hidden />
-                        <span className="sr-only"> (opens in a new tab)</span>
-                    </a>
-                </p>
-            )}
+            {filed && <FiledAs link={filed} />}
             {error && !asking && <Callout tone="danger">{error}</Callout>}
             {asking && (
                 <Modal title="Not a bug" titleId={`fnd-nab-${rec.id}`} onClose={() => setAsking(false)} onSubmit={notABug}>
@@ -306,8 +311,8 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
  * one that found nothing, says so in one sentence when the project explores by objectives. A refusal from the server is shown as its
  * sentence.
  */
-export function CandidateFindings({ projectId, jobId, explores }: { projectId: string; jobId: string; /** The project explores by objectives. */ explores: boolean }) {
-    const got = useFetch<FindingsAnswer>(`/projects/${projectId}/candidate-findings?job=${encodeURIComponent(jobId)}`);
+export function CandidateFindings({ projectId, jobId, agentId, explores }: { projectId: string; /** One run's findings… */ jobId?: string; /** …or one agent's (its agent page). */ agentId?: string; /** The project explores by objectives. */ explores: boolean }) {
+    const got = useFetch<FindingsAnswer>(`/projects/${projectId}/candidate-findings?${jobId ? `job=${encodeURIComponent(jobId)}` : `agent=${encodeURIComponent(agentId ?? "")}`}`);
     const here = useHere(projectId);
     const write = !here.why("ai_studio.tests.write");
     const trackers = useFetch<Integration[]>(write ? `/projects/${projectId}/integrations` : null);

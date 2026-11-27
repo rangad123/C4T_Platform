@@ -631,7 +631,7 @@
     "meta": {
      "layer": "page"
     },
-    "validationReason": "The ariaSnapshot expectation in step 9 contains the literal placeholder {{unique}} instead of the generated value, so it cannot match the rendered name 'Test User 17956367358500'. The page itself appears to render the account correctly with an empty delivery address textbox, so the test's expected snapshot needs the unique value substituted (or a regex used) for step 9 to pass. (proposed fix rejected: sourced check expected:1 was loosened (expected \"- main:\\n  - heading \\\"Your account\\\" [level=1]\\n  - paragraph: /Signed in as [\\\\w.,:/-]+@example\\\\.com/\\n  - text: Name\\n  - textbox \\\"Name\\\": Test User {{unique}}\\n  - text: Default delivery address\\n  - textbox \\\"Default delivery address\\\"\\n  - button \\\"Save\\\"\" \u2192 \"- textbox \\\"Default delivery address\\\"\"))"
+    "validationReason": "The ariaSnapshot expectation in step 9 contains the literal placeholder {{unique}} instead of the generated value, so it cannot match the rendered name 'Test User 17956367358500'. The page itself appears to render the account correctly with an empty delivery address textbox, so the test's expected snapshot needs the unique value substituted (or a regex used) for step 9 to pass. (proposed fix rejected: sourced check expected:1 was loosened (expected \"- main:\\n  - heading \\\"Your account\\\" [level=1]\\n  - paragraph: /Signed in as [\\\\w.,:/-]+@example\\\\.com/\\n  - text: Name\\n  - textbox \\\"Name\\\": Test User {{unique}}\\n  - text: Default delivery address\\n  - textbox \\\"Default delivery address\\\"\\n  - button \\\"Save\\\"\" → \"- textbox \\\"Default delivery address\\\"\"))"
    },
    "requirements": {
     "1.10": "A new account is signed in straight away and has no default delivery address yet."
@@ -869,7 +869,7 @@
       "text": "Total equals subtotal minus discount plus shipping charge.",
       "source": "R-12c484d78f10"
      },
-     "observed": "Signed in as a new account, added Trail Mug (1) and Desk Lamp (2). Cart before discount: Subtotal $47.00, Discount $0.00, Shipping $5.00, Total $52.00 (consistent with rule R-12c484d78f10). After applying discount code SAVE10 the cart shows Subtotal $47.00, Discount (SAVE10) \u2212$1.25, Shipping $5.00, Total $52.00 (also after reload). Per the rule, Total should be 47.00 \u2212 discount + 5.00; with a 10% discount the expected discount is $4.70 and total $47.30. The displayed total ($52.00) does not equal subtotal minus discount plus shipping ($50.75 with the displayed discount), so the rule is violated.",
+     "observed": "Signed in as a new account, added Trail Mug (1) and Desk Lamp (2). Cart before discount: Subtotal $47.00, Discount $0.00, Shipping $5.00, Total $52.00 (consistent with rule R-12c484d78f10). After applying discount code SAVE10 the cart shows Subtotal $47.00, Discount (SAVE10) −$1.25, Shipping $5.00, Total $52.00 (also after reload). Per the rule, Total should be 47.00 − discount + 5.00; with a 10% discount the expected discount is $4.70 and total $47.30. The displayed total ($52.00) does not equal subtotal minus discount plus shipping ($50.75 with the displayed discount), so the rule is violated.",
      "evidence": {
       "screenshots": [
        "d81258d6-4e63-4e24-b373-b0a38efe0e3b",
@@ -1773,7 +1773,7 @@
    },
    "requirements": {
     "2.11": "A person signs in with their email address and password; a wrong combination is refused with \"Email or password is wrong.\" (API: 401).",
-    "2.14": "After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed\u2026 After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed sign-ins. Try again in a minute.\" (API: 429), even with the right password."
+    "2.14": "After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed… After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed sign-ins. Try again in a minute.\" (API: 429), even with the right password."
    }
   },
   {
@@ -2461,7 +2461,7 @@
    },
    "requirements": {
     "7.2": "On the Account page the customer can change their name and default delivery address and save them; the name is required.",
-    "7.3": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting\u2026 Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting address of the next checkout."
+    "7.3": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting… Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting address of the next checkout."
    }
   },
   {
@@ -2740,7 +2740,7 @@
    },
    "requirements": {
     "7.2": "On the Account page the customer can change their name and default delivery address and save them; the name is required.",
-    "7.3": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting\u2026 Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting address of the next checkout."
+    "7.3": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting… Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting address of the next checkout."
    }
   },
   {
@@ -3273,6 +3273,1035 @@
     "validationReason": null
    },
    "requirements": {}
+  },
+  {
+   "trial": "rbac-1",
+   "testKey": "WEB-027",
+   "label": "fp",
+   "finding": {
+    "id": "47f85d2f-cbac-4a51-82db-f3fadf6cf268",
+    "fingerprint": "4df199a5272b128f31ec25bad264fbbe30feedc1f3f0b8ee59a20afaf124b22e",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 13
+     },
+     "expected": {
+      "text": "The URL becomes /notes (requirement 3.13.b) The deleted note title no longer appears in the notes list The note count is one lower than before deleting",
+      "source": "expected:1"
+     },
+     "observed": "Error: 13. The notes list page is shown",
+     "evidence": {
+      "screenshots": [],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "not_run",
+     "confidence": "medium",
+     "fingerprint": "4df199a5272b128f31ec25bad264fbbe30feedc1f3f0b8ee59a20afaf124b22e",
+     "modelVersion": null,
+     "replays": []
+    },
+    "firstSeenAt": "2026-11-25T19:46:12.184Z",
+    "testId": "360048e1-8f48-4db9-b9a4-17e3eba454ed",
+    "confidence": "medium",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 13,
+     "check": "visible",
+     "target": "Notes",
+     "error": "Error: 13. The notes list page is shown\n\nexpect(locator).toBeVisible() failed\n\nLocator: getByRole('heading', { name: 'Notes' })\nExpected: visible",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 13,
+     "check": "visible",
+     "target": "Notes",
+     "error": "Error: 13. The notes list page is shown\n\nexpect(locator).toBeVisible() failed\n\nLocator: getByRole('heading', { name: 'Notes' })\nExpected: visible",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 13,
+     "check": "visible",
+     "target": "Notes",
+     "error": "Error: 13. The notes list page is shown\n\nexpect(locator).toBeVisible() failed\n\nLocator: getByRole('heading', { name: 'Notes' })\nExpected: visible",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "360048e1-8f48-4db9-b9a4-17e3eba454ed",
+    "title": "Deleting a created note returns the owner to the notes list",
+    "spec": {
+     "testId": "WEB-027",
+     "title": "Deleting a created note returns the owner to the notes list",
+     "description": "The owner deletes a note the test created and is returned to the notes list without it.",
+     "kind": "web",
+     "category": "Notes",
+     "type": "workflow",
+     "priority": "high",
+     "preconditions": [
+      "User is signed in",
+      "Note created by this test exists"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/notes",
+       "description": "Open /notes"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "{{credentials.ana.username}}",
+       "description": "Sign in with the test account"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.ana.password}}",
+       "description": "Enter the test account password"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Submit sign in"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "New note",
+        "exact": true,
+        "within": {
+         "by": "role",
+         "role": "navigation",
+         "value": "Main"
+        }
+       },
+       "description": "Open the new note form from the main navigation"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Title"
+       },
+       "value": "Delete me qa8uku {{unique}}",
+       "description": "Enter a generated note title"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Text"
+       },
+       "value": "Temporary note qa8uku {{unique}}",
+       "description": "Enter note text"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Save note",
+        "exact": true
+       },
+       "description": "Save the new note"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Notes",
+        "exact": true,
+        "within": {
+         "by": "role",
+         "role": "navigation",
+         "value": "Main"
+        }
+       },
+       "description": "Return to the notes list before deleting"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Delete me qa8uku {{unique}}",
+        "exact": true
+       },
+       "description": "Open the note this test created"
+      },
+      {
+       "action": "assert",
+       "check": "url",
+       "expected": "/notes",
+       "source": "expected:1",
+       "description": "Owner is returned to the notes list"
+      },
+      {
+       "action": "assert",
+       "check": "count",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Delete me qa8uku {{unique}}",
+        "exact": true
+       },
+       "expected": 0,
+       "source": "expected:2",
+       "description": "The deleted note title no longer appears in the notes list"
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "role",
+        "role": "heading",
+        "value": "Notes"
+       },
+       "source": "expected:1",
+       "description": "The notes list page is shown"
+      }
+     ],
+     "expectedResults": [
+      "The URL becomes /notes (requirement 3.13.b)",
+      "The deleted note title no longer appears in the notes list",
+      "The note count is one lower than before deleting"
+     ],
+     "testData": {
+      "runTag": "qam0je"
+     },
+     "tags": [
+      "workflow",
+      "high",
+      "role:ana"
+     ],
+     "source": {
+      "scenarioId": "S-014",
+      "journey": "Delete a note",
+      "origin": "browser-agent",
+      "requirements": [
+       "3.13.b",
+       "3.14"
+      ]
+     }
+    },
+    "meta": {
+     "model": "claude-haiku-5-5",
+     "scenario": {
+      "title": "Deleting a created note returns the owner to the notes list",
+      "description": "The owner deletes a note the test created and is returned to the notes list without it.",
+      "category": "Notes",
+      "type": "workflow",
+      "priority": "high",
+      "journey": "Delete a note",
+      "startPath": "/notes",
+      "preconditions": [
+       "User is signed in",
+       "Note created by this test exists"
+      ],
+      "expectedResults": [
+       "The URL becomes /notes (requirement 3.13.b)",
+       "The deleted note title no longer appears in the notes list",
+       "The note count is one lower than before deleting"
+      ],
+      "requiresAuth": true,
+      "requiredData": [
+       "create a note with generated data tagged qa8uku, then delete it"
+      ],
+      "requirements": [
+       "3.13.b",
+       "3.14"
+      ],
+      "role": "ana",
+      "scenarioId": "S-014"
+     },
+     "authoring": "complete",
+     "explanation": "Signed in with the test account, created a note with a generated title tagged qa8uku, opened its own page and deleted it. The app returned to /notes (expected 1), the note's title no longer appears in the list (expected 2, count 0), and the notes list is shown. Expected 3 (the count is one lower) is not asserted with an exact number: the list shows no count element, and the test does not hard-code the number the app gives. Before deletion the note was in the list, and afterwards its entry was gone from the full list snapshot. Note: the Delete note click did not raise a confirmation dialog in this run, so the prepared dialog answer was unused.",
+     "modelVersion": "aaad1f5f-b84e-4d76-8be1-bc9092c9b272",
+     "layer": "page"
+    },
+    "validationReason": "Replay of previous steps failed at \"Open the new note form from the main navigation\": locator.click: Timeout 6000ms exceeded. Call log:   - waiting for getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'New note', exact: true }) "
+   },
+   "requirements": {
+    "1.1": "BenchNotes is a notes application for a team: people keep private notes and share them with colleagues by email.",
+    "1.2": "Everyone with an account has one role: user, manager or admin.",
+    "1.3": "A user keeps their own notes and reads the notes shared with them.",
+    "1.4": "A manager can do everything a user can and can also read every note.",
+    "1.5": "An admin can do everything a manager can and can also see everyone with an account and change their roles.",
+    "1.6": "A person's role is shown on their Account page.",
+    "2.1": "A visitor (not signed in) can open the welcome page, the sign-in page and the create-account page; any other page takes them to the sign-in page and, after… A visitor (not signed in) can open the welcome page, the sign-in page and the create-account page; any other page takes them to the sign-in page and, after signing in, back to the page they asked for.",
+    "2.2": "A signed-in person who opens the welcome page is taken to their notes.",
+    "2.3": "The main navigation shows Notes, New note, Account and Sign out to signed-in people, People to admins, and Sign in and Create account to visitors.",
+    "2.4": "Anyone can create an account with a name, an email address and a password.",
+    "2.5": "The name is required; an empty name is refused with \"Enter your name.\"",
+    "2.6": "The email address must be a valid email address; anything else is refused with \"Enter a valid email address.\"",
+    "2.7": "A password needs at least 8 characters; a shorter one is refused with a message that states the minimum (API: 400).",
+    "2.8": "An email address can belong to one account only; registering again with it is refused (API: 409).",
+    "2.9": "Every new account is a user.",
+    "2.10": "A new account is signed in straight away and lands on the notes list.",
+    "2.11": "A person signs in with their email address and password; a wrong combination is refused with \"Email or password is wrong.\" (API: 401).",
+    "2.12": "Signing out ends the session: from then on that session gives no access at all, and the person is a visitor again.",
+    "2.13": "The Account page shows the person's name, email address and role.",
+    "2.14": "After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed… After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed sign-ins. Try again in a minute.\" (API: 429), even with the right password.",
+    "3.1": "The Notes page lists every note the person may read, each with its title and its owner's name.",
+    "3.2": "A person with no note they may read sees \"No notes yet.\"",
+    "3.3": "Anyone signed in can create a note with a title and an optional text; the person who creates a note is its owner.",
+    "3.4": "Every note has a title: creating a note without one is refused with \"Give the note a title.\" (API: 400), and no note is created.",
+    "3.5": "A title has at most 120 characters; a longer one is refused with a message (API: 400).",
+    "3.6": "After creating a note the person sees the new note's page.",
+    "3.7": "A note can be read by its owner, by the people it is shared with, by managers and by admins.",
+    "3.8": "For anyone else a note does not exist: it shows \"Note not found\" (page and API: 404), the same as a note that was never created.",
+    "3.9": "A note page shows the title, the owner's name, the text and who the note is shared with (\"Nobody.\" when it is shared with no one).",
+    "3.10": "Only the owner can change a note's title or text; anyone else who may read it is refused with \"Only the owner can change this note.\" (API: 403).",
+    "3.11": "A changed note still needs a title (API: 400).",
+    "3.12": "Saving changes to a note shows \"Saved.\" and leaves its sharing as it was.",
+    "3.13": "Only the owner can delete a note; anyone else who may read it is refused (API: 403). After deleting it, the owner is back on the notes list.",
+    "3.14": "The edit, share and delete controls appear on a note's page for its owner only.",
+    "3.15": "A note's title and text are always shown as plain text, exactly as typed: characters such as < and > never become part of the page's markup.",
+    "3.16": "Deleting a note also deletes its sharing: no stored share is ever left for a note that no longer exists.",
+    "4.1": "Only the owner can share a note or stop sharing it; anyone else who may read it is refused (API: 403).",
+    "4.2": "The owner shares a note by entering a colleague's email address; the colleague can then read the note.",
+    "4.3": "Sharing with an email address that has no account is refused with \"No one with that email.\" (API: 404).",
+    "4.4": "The owner cannot share a note with themselves (API: 400).",
+    "4.5": "Sharing a note again with someone who already has it changes nothing.",
+    "4.6": "The owner can stop sharing the note with anyone on its list; that person can then no longer read the note.",
+    "4.7": "Stopping sharing with someone the note is not shared with is refused (API: 404).",
+    "5.1": "The People page lists everyone with an account, with their name, email address and role, and lets an admin change each role.",
+    "5.2": "Only admins can open the People page; anyone else sees \"Not allowed\" (403).",
+    "5.3": "Only admins can get the list of people through the API; anyone else is refused with \"Only admins can see people.\" (403).",
+    "5.4": "Only admins can change a person's role; anyone else is refused with \"Only admins can change roles.\" (403).",
+    "5.5": "A role is user, manager or admin; any other value is refused with \"Choose user, manager or admin.\" (API: 400).",
+    "5.6": "Changing the role of a person who does not exist is refused with \"Person not found.\" (API: 404).",
+    "5.7": "A changed role applies from the person's next request.",
+    "6.1": "The JSON API is described at /openapi.json, and every operation answers with the status codes described there.",
+    "6.2": "API operations other than registering, signing in and signing out answer 401 with \"Sign in first.\" to a visitor.",
+    "6.3": "API errors are JSON objects with an error message that can be shown to the person.",
+    "6.4": "Request bodies larger than 64 KB are ignored."
+   }
+  },
+  {
+   "trial": "rbac-2",
+   "testKey": "WEB-047",
+   "label": "fp",
+   "finding": {
+    "id": "36222418-93e1-4f12-89bd-3bc03674e5d6",
+    "fingerprint": "5e30018be1688adc7b3d859a3b56dfc9184ecefab3c483e1dd68eea7ad14ddc2",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 11
+     },
+     "expected": {
+      "text": "After Delete note the URL becomes /notes (requirement 3.13.b) The generated note title no longer appears in the notes list (/notes)",
+      "source": "expected:1"
+     },
+     "observed": "Error: 9. Verify urlPattern of heading \"Notes\" = /notes",
+     "evidence": {
+      "screenshots": [],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "not_run",
+     "confidence": "medium",
+     "fingerprint": "5e30018be1688adc7b3d859a3b56dfc9184ecefab3c483e1dd68eea7ad14ddc2",
+     "modelVersion": null,
+     "replays": []
+    },
+    "firstSeenAt": "2026-11-25T20:36:46.928Z",
+    "testId": "4fa700e9-a875-4e29-9267-b84cdbdc69e2",
+    "confidence": "medium",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "urlPattern",
+     "target": "Notes",
+     "value": "/notes",
+     "error": "Error: 9. Verify urlPattern of heading \"Notes\" = /notes\n\nexpect(page).toHaveURL(expected) failed\n\nExpected pattern: /^[a-z][a-z0-9+.-]*:\\/\\/[^/]+\\/notes$/i\nReceived string:  \"http://127.0.0.1:7150/notes/n4\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "urlPattern",
+     "target": "Notes",
+     "value": "/notes",
+     "error": "Error: 9. Verify urlPattern of heading \"Notes\" = /notes\n\nexpect(page).toHaveURL(expected) failed\n\nExpected pattern: /^[a-z][a-z0-9+.-]*:\\/\\/[^/]+\\/notes$/i\nReceived string:  \"http://127.0.0.1:7150/notes/n4\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "urlPattern",
+     "target": "Notes",
+     "value": "/notes",
+     "error": "Error: 9. Verify urlPattern of heading \"Notes\" = /notes\n\nexpect(page).toHaveURL(expected) failed\n\nExpected pattern: /^[a-z][a-z0-9+.-]*:\\/\\/[^/]+\\/notes$/i\nReceived string:  \"http://127.0.0.1:7150/notes/n4\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "4fa700e9-a875-4e29-9267-b84cdbdc69e2",
+    "title": "Owner deletes own note and returns to the list",
+    "spec": {
+     "testId": "WEB-047",
+     "title": "Owner deletes own note and returns to the list",
+     "description": "Sign in as ana, create a note with generated data, open it, click Delete note and confirm the deletion.",
+     "kind": "web",
+     "category": "Notes",
+     "type": "workflow",
+     "priority": "high",
+     "preconditions": [
+      "Signed in as test account ana"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/notes/new",
+       "description": "Open /notes/new"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "{{credentials.username}}",
+       "description": "Enter \"{{credentials.username}}\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.password}}",
+       "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "New note",
+        "exact": true
+       },
+       "description": "Wait until link \"New note\" is visible"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Title"
+       },
+       "value": "{{unique}} Delete me",
+       "description": "Enter \"{{unique}} Delete me\" into label \"Title\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Text"
+       },
+       "value": "Created by an automated test. Quarterly review: safe to delete.",
+       "description": "Enter \"Created by an automated test. Quarterly review: safe to delete.\" into label \"Text\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Save note",
+        "exact": true
+       },
+       "description": "Click button \"Save note\""
+      },
+      {
+       "action": "assert",
+       "check": "urlPattern",
+       "locator": {
+        "by": "role",
+        "role": "heading",
+        "value": "Notes"
+       },
+       "expected": "/notes",
+       "source": "expected:1",
+       "description": "Verify urlPattern of heading \"Notes\" = /notes"
+      },
+      {
+       "action": "assert",
+       "check": "notText",
+       "locator": {
+        "by": "role",
+        "role": "list"
+       },
+       "expected": "{{unique}} Delete me",
+       "source": "expected:2",
+       "description": "Verify notText of list \"\" = {{unique}} Delete me"
+      },
+      {
+       "action": "assert",
+       "check": "url",
+       "expected": "/notes",
+       "source": "expected:1",
+       "description": "Verify url = /notes"
+      }
+     ],
+     "expectedResults": [
+      "After Delete note the URL becomes /notes (requirement 3.13.b)",
+      "The generated note title no longer appears in the notes list"
+     ],
+     "testData": {
+      "runTag": "qau8sz"
+     },
+     "tags": [
+      "workflow",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-040",
+      "journey": "Delete a note",
+      "origin": "browser-agent",
+      "requirements": [
+       "3.13.b"
+      ]
+     }
+    },
+    "meta": {
+     "model": "claude-haiku-5-5",
+     "scenario": {
+      "title": "Owner deletes own note and returns to the list",
+      "description": "Sign in as ana, create a note with generated data, open it, click Delete note and confirm the deletion.",
+      "category": "Notes",
+      "type": "workflow",
+      "priority": "high",
+      "journey": "Delete a note",
+      "startPath": "/notes/new",
+      "preconditions": [
+       "Signed in as test account ana"
+      ],
+      "expectedResults": [
+       "After Delete note the URL becomes /notes (requirement 3.13.b)",
+       "The generated note title no longer appears in the notes list"
+      ],
+      "requiresAuth": true,
+      "requiredData": [
+       "Title qaijn4 Delete me, generated text"
+      ],
+      "requirements": [
+       "3.13.b"
+      ],
+      "scenarioId": "S-040"
+     },
+     "authoring": "complete",
+     "explanation": "Signed in as the test account, created a note titled \"{{unique}} Delete me\" (saved as /notes/n54), opened it, and clicked Delete note. The app navigated to /notes, and the note title does not appear in the notes list. Assertions: URL is /notes; the list does not contain the generated title. Caveat: the Delete note click was reported by the tool as failing (\"No dialog appeared\"), even though the page had already moved to /notes and the note was gone. No confirmation dialog was observed, so the recorded step may not reflect the click; the deletion itself was verified in the UI.",
+     "modelVersion": "ef2b0a43-6dc6-4c27-9930-07b563f894b2",
+     "layer": "page"
+    },
+    "validationReason": "After saving, the app navigates to the note detail page (/notes/n4), not the /notes list, so the step 9 URL assertion is wrong. The test also never clicks 'Delete note' before asserting the URL is /notes and that the title is gone, so the expectations are checked against the wrong page. (proposed fix rejected: sourced check expected:2 was loosened (expected \"{{unique}} Delete me\" → \"1795637547119 Delete me\"))"
+   },
+   "requirements": {
+    "1.1": "BenchNotes is a notes application for a team: people keep private notes and share them with colleagues by email.",
+    "1.2": "Everyone with an account has one role: user, manager or admin.",
+    "1.3": "A user keeps their own notes and reads the notes shared with them.",
+    "1.4": "A manager can do everything a user can and can also read every note.",
+    "1.5": "An admin can do everything a manager can and can also see everyone with an account and change their roles.",
+    "1.6": "A person's role is shown on their Account page.",
+    "2.1": "A visitor (not signed in) can open the welcome page, the sign-in page and the create-account page; any other page takes them to the sign-in page and, after… A visitor (not signed in) can open the welcome page, the sign-in page and the create-account page; any other page takes them to the sign-in page and, after signing in, back to the page they asked for.",
+    "2.2": "A signed-in person who opens the welcome page is taken to their notes.",
+    "2.3": "The main navigation shows Notes, New note, Account and Sign out to signed-in people, People to admins, and Sign in and Create account to visitors.",
+    "2.4": "Anyone can create an account with a name, an email address and a password.",
+    "2.5": "The name is required; an empty name is refused with \"Enter your name.\"",
+    "2.6": "The email address must be a valid email address; anything else is refused with \"Enter a valid email address.\"",
+    "2.7": "A password needs at least 8 characters; a shorter one is refused with a message that states the minimum (API: 400).",
+    "2.8": "An email address can belong to one account only; registering again with it is refused (API: 409).",
+    "2.9": "Every new account is a user.",
+    "2.10": "A new account is signed in straight away and lands on the notes list.",
+    "2.11": "A person signs in with their email address and password; a wrong combination is refused with \"Email or password is wrong.\" (API: 401).",
+    "2.12": "Signing out ends the session: from then on that session gives no access at all, and the person is a visitor again.",
+    "2.13": "The Account page shows the person's name, email address and role.",
+    "2.14": "After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed… After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed sign-ins. Try again in a minute.\" (API: 429), even with the right password.",
+    "3.1": "The Notes page lists every note the person may read, each with its title and its owner's name.",
+    "3.2": "A person with no note they may read sees \"No notes yet.\"",
+    "3.3": "Anyone signed in can create a note with a title and an optional text; the person who creates a note is its owner.",
+    "3.4": "Every note has a title: creating a note without one is refused with \"Give the note a title.\" (API: 400), and no note is created.",
+    "3.5": "A title has at most 120 characters; a longer one is refused with a message (API: 400).",
+    "3.6": "After creating a note the person sees the new note's page.",
+    "3.7": "A note can be read by its owner, by the people it is shared with, by managers and by admins.",
+    "3.8": "For anyone else a note does not exist: it shows \"Note not found\" (page and API: 404), the same as a note that was never created.",
+    "3.9": "A note page shows the title, the owner's name, the text and who the note is shared with (\"Nobody.\" when it is shared with no one).",
+    "3.10": "Only the owner can change a note's title or text; anyone else who may read it is refused with \"Only the owner can change this note.\" (API: 403).",
+    "3.11": "A changed note still needs a title (API: 400).",
+    "3.12": "Saving changes to a note shows \"Saved.\" and leaves its sharing as it was.",
+    "3.13": "Only the owner can delete a note; anyone else who may read it is refused (API: 403). After deleting it, the owner is back on the notes list.",
+    "3.14": "The edit, share and delete controls appear on a note's page for its owner only.",
+    "3.15": "A note's title and text are always shown as plain text, exactly as typed: characters such as < and > never become part of the page's markup.",
+    "3.16": "Deleting a note also deletes its sharing: no stored share is ever left for a note that no longer exists.",
+    "4.1": "Only the owner can share a note or stop sharing it; anyone else who may read it is refused (API: 403).",
+    "4.2": "The owner shares a note by entering a colleague's email address; the colleague can then read the note.",
+    "4.3": "Sharing with an email address that has no account is refused with \"No one with that email.\" (API: 404).",
+    "4.4": "The owner cannot share a note with themselves (API: 400).",
+    "4.5": "Sharing a note again with someone who already has it changes nothing.",
+    "4.6": "The owner can stop sharing the note with anyone on its list; that person can then no longer read the note.",
+    "4.7": "Stopping sharing with someone the note is not shared with is refused (API: 404).",
+    "5.1": "The People page lists everyone with an account, with their name, email address and role, and lets an admin change each role.",
+    "5.2": "Only admins can open the People page; anyone else sees \"Not allowed\" (403).",
+    "5.3": "Only admins can get the list of people through the API; anyone else is refused with \"Only admins can see people.\" (403).",
+    "5.4": "Only admins can change a person's role; anyone else is refused with \"Only admins can change roles.\" (403).",
+    "5.5": "A role is user, manager or admin; any other value is refused with \"Choose user, manager or admin.\" (API: 400).",
+    "5.6": "Changing the role of a person who does not exist is refused with \"Person not found.\" (API: 404).",
+    "5.7": "A changed role applies from the person's next request.",
+    "6.1": "The JSON API is described at /openapi.json, and every operation answers with the status codes described there.",
+    "6.2": "API operations other than registering, signing in and signing out answer 401 with \"Sign in first.\" to a visitor.",
+    "6.3": "API errors are JSON objects with an error message that can be shown to the person.",
+    "6.4": "Request bodies larger than 64 KB are ignored."
+   }
+  },
+  {
+   "trial": "rbac-5",
+   "testKey": "WEB-049",
+   "label": "fp",
+   "finding": {
+    "id": "0499a608-a71f-4efd-9a57-308ff34a00f0",
+    "fingerprint": "0abc9cf9706337c6d44efcadffcc577689692a9abfdd76a617479a7b67ce3e99",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 11
+     },
+     "expected": {
+      "text": "The Delete note button is shown on the note the test created (requirement 3.3.b) After deleting, the browser is at /notes (requirement 3.13.b) and the deleted title is no longer listed (/notes)",
+      "source": "expected:2"
+     },
+     "observed": "Error: 10. Verify urlPattern of heading \"Notes\" = /notes",
+     "evidence": {
+      "screenshots": [],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "not_run",
+     "confidence": "medium",
+     "fingerprint": "0abc9cf9706337c6d44efcadffcc577689692a9abfdd76a617479a7b67ce3e99",
+     "modelVersion": null,
+     "replays": []
+    },
+    "firstSeenAt": "2026-11-26T12:17:45.926Z",
+    "testId": "d31cf8b3-114d-46c4-af54-31271ebc4b58",
+    "confidence": "medium",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "urlPattern",
+     "target": "Notes",
+     "value": "/notes",
+     "error": "Error: 10. Verify urlPattern of heading \"Notes\" = /notes\n\nexpect(page).toHaveURL(expected) failed\n\nExpected pattern: /^[a-z][a-z0-9+.-]*:\\/\\/[^/]+\\/notes$/i\nReceived string:  \"http://127.0.0.1:7150/notes/n4\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "urlPattern",
+     "target": "Notes",
+     "value": "/notes",
+     "error": "Error: 10. Verify urlPattern of heading \"Notes\" = /notes\n\nexpect(page).toHaveURL(expected) failed\n\nExpected pattern: /^[a-z][a-z0-9+.-]*:\\/\\/[^/]+\\/notes$/i\nReceived string:  \"http://127.0.0.1:7150/notes/n4\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "urlPattern",
+     "target": "Notes",
+     "value": "/notes",
+     "error": "Error: 10. Verify urlPattern of heading \"Notes\" = /notes\n\nexpect(page).toHaveURL(expected) failed\n\nExpected pattern: /^[a-z][a-z0-9+.-]*:\\/\\/[^/]+\\/notes$/i\nReceived string:  \"http://127.0.0.1:7150/notes/n4\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "d31cf8b3-114d-46c4-af54-31271ebc4b58",
+    "title": "Delete a note created by the test and return to the list",
+    "spec": {
+     "testId": "WEB-049",
+     "title": "Delete a note created by the test and return to the list",
+     "description": "Create a note, then delete it from its page and check the owner lands on the notes list without it.",
+     "kind": "web",
+     "category": "Notes",
+     "type": "workflow",
+     "priority": "high",
+     "preconditions": [],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/notes/new",
+       "description": "Open /notes/new"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "{{credentials.username}}",
+       "description": "Enter \"{{credentials.username}}\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.password}}",
+       "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "New note",
+        "exact": true
+       },
+       "description": "Wait until link \"New note\" is visible"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Title"
+       },
+       "value": "Note qas4e8 {{unique}}",
+       "description": "Enter \"Note qas4e8 {{unique}}\" into label \"Title\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Text"
+       },
+       "value": "Test note body qas4e8 {{unique}}",
+       "description": "Enter \"Test note body qas4e8 {{unique}}\" into label \"Text\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Save note",
+        "exact": true
+       },
+       "description": "Click button \"Save note\""
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Delete note",
+        "exact": true
+       },
+       "source": "expected:1",
+       "description": "Verify visible of button \"Delete note\""
+      },
+      {
+       "action": "assert",
+       "check": "urlPattern",
+       "locator": {
+        "by": "role",
+        "role": "heading",
+        "value": "Notes"
+       },
+       "expected": "/notes",
+       "source": "expected:2",
+       "description": "Verify urlPattern of heading \"Notes\" = /notes"
+      },
+      {
+       "action": "assert",
+       "check": "notText",
+       "locator": {
+        "by": "role",
+        "role": "list"
+       },
+       "expected": "Note qas4e8 {{unique}}",
+       "source": "expected:2",
+       "description": "Verify notText of list \"\" = Note qas4e8 {{unique}}"
+      }
+     ],
+     "expectedResults": [
+      "The Delete note button is shown on the note the test created (requirement 3.3.b)",
+      "After deleting, the browser is at /notes (requirement 3.13.b) and the deleted title is no longer listed"
+     ],
+     "testData": {},
+     "tags": [
+      "workflow",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-036",
+      "journey": "Delete a note",
+      "origin": "browser-agent",
+      "requirements": [
+       "3.3.b",
+       "3.13.b"
+      ]
+     }
+    },
+    "meta": {
+     "model": "claude-haiku-5-5",
+     "scenario": {
+      "title": "Delete a note created by the test and return to the list",
+      "description": "Create a note, then delete it from its page and check the owner lands on the notes list without it.",
+      "category": "Notes",
+      "type": "workflow",
+      "priority": "high",
+      "journey": "Delete a note",
+      "startPath": "/notes/new",
+      "preconditions": [],
+      "expectedResults": [
+       "The Delete note button is shown on the note the test created (requirement 3.3.b)",
+       "After deleting, the browser is at /notes (requirement 3.13.b) and the deleted title is no longer listed"
+      ],
+      "requiresAuth": true,
+      "requiredData": [
+       "test account credentials for ana",
+       "note created with generated data tagged qas4e8"
+      ],
+      "requirements": [
+       "3.3.b",
+       "3.13.b"
+      ],
+      "scenarioId": "S-036"
+     },
+     "authoring": "complete",
+     "explanation": "Signed in as ana, created a note titled \"Note qas4e8 <unique>\" (/notes/n51), confirmed the Delete note button was visible on it, then deleted it. The app navigated to /notes and the deleted title is no longer in the list. No confirmation dialog appeared on delete, so the dialog preparation was unused.",
+     "modelVersion": "18339daa-97c2-4c5b-812f-7a89a475313a",
+     "layer": "page"
+    },
+    "validationReason": "After saving, the app correctly lands on the note detail page /notes/n4 and the Delete note button is visible (step 9 passed). The test then asserts the URL is /notes at step 10, but the test never clicks Delete note, so the browser is never sent back to /notes. The later list check also has no list on the detail page. (proposed fix rejected: sourced check expected:2 was loosened (check notText → urlPattern))"
+   },
+   "requirements": {
+    "1.1": "BenchNotes is a notes application for a team: people keep private notes and share them with colleagues by email.",
+    "1.2": "Everyone with an account has one role: user, manager or admin.",
+    "1.3": "A user keeps their own notes and reads the notes shared with them.",
+    "1.4": "A manager can do everything a user can and can also read every note.",
+    "1.5": "An admin can do everything a manager can and can also see everyone with an account and change their roles.",
+    "1.6": "A person's role is shown on their Account page.",
+    "2.1": "A visitor (not signed in) can open the welcome page, the sign-in page and the create-account page; any other page takes them to the sign-in page and, after… A visitor (not signed in) can open the welcome page, the sign-in page and the create-account page; any other page takes them to the sign-in page and, after signing in, back to the page they asked for.",
+    "2.2": "A signed-in person who opens the welcome page is taken to their notes.",
+    "2.3": "The main navigation shows Notes, New note, Account and Sign out to signed-in people, People to admins, and Sign in and Create account to visitors.",
+    "2.4": "Anyone can create an account with a name, an email address and a password.",
+    "2.5": "The name is required; an empty name is refused with \"Enter your name.\"",
+    "2.6": "The email address must be a valid email address; anything else is refused with \"Enter a valid email address.\"",
+    "2.7": "A password needs at least 8 characters; a shorter one is refused with a message that states the minimum (API: 400).",
+    "2.8": "An email address can belong to one account only; registering again with it is refused (API: 409).",
+    "2.9": "Every new account is a user.",
+    "2.10": "A new account is signed in straight away and lands on the notes list.",
+    "2.11": "A person signs in with their email address and password; a wrong combination is refused with \"Email or password is wrong.\" (API: 401).",
+    "2.12": "Signing out ends the session: from then on that session gives no access at all, and the person is a visitor again.",
+    "2.13": "The Account page shows the person's name, email address and role.",
+    "2.14": "After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed… After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed sign-ins. Try again in a minute.\" (API: 429), even with the right password.",
+    "3.1": "The Notes page lists every note the person may read, each with its title and its owner's name.",
+    "3.2": "A person with no note they may read sees \"No notes yet.\"",
+    "3.3": "Anyone signed in can create a note with a title and an optional text; the person who creates a note is its owner.",
+    "3.4": "Every note has a title: creating a note without one is refused with \"Give the note a title.\" (API: 400), and no note is created.",
+    "3.5": "A title has at most 120 characters; a longer one is refused with a message (API: 400).",
+    "3.6": "After creating a note the person sees the new note's page.",
+    "3.7": "A note can be read by its owner, by the people it is shared with, by managers and by admins.",
+    "3.8": "For anyone else a note does not exist: it shows \"Note not found\" (page and API: 404), the same as a note that was never created.",
+    "3.9": "A note page shows the title, the owner's name, the text and who the note is shared with (\"Nobody.\" when it is shared with no one).",
+    "3.10": "Only the owner can change a note's title or text; anyone else who may read it is refused with \"Only the owner can change this note.\" (API: 403).",
+    "3.11": "A changed note still needs a title (API: 400).",
+    "3.12": "Saving changes to a note shows \"Saved.\" and leaves its sharing as it was.",
+    "3.13": "Only the owner can delete a note; anyone else who may read it is refused (API: 403). After deleting it, the owner is back on the notes list.",
+    "3.14": "The edit, share and delete controls appear on a note's page for its owner only.",
+    "3.15": "A note's title and text are always shown as plain text, exactly as typed: characters such as < and > never become part of the page's markup.",
+    "3.16": "Deleting a note also deletes its sharing: no stored share is ever left for a note that no longer exists.",
+    "4.1": "Only the owner can share a note or stop sharing it; anyone else who may read it is refused (API: 403).",
+    "4.2": "The owner shares a note by entering a colleague's email address; the colleague can then read the note.",
+    "4.3": "Sharing with an email address that has no account is refused with \"No one with that email.\" (API: 404).",
+    "4.4": "The owner cannot share a note with themselves (API: 400).",
+    "4.5": "Sharing a note again with someone who already has it changes nothing.",
+    "4.6": "The owner can stop sharing the note with anyone on its list; that person can then no longer read the note.",
+    "4.7": "Stopping sharing with someone the note is not shared with is refused (API: 404).",
+    "5.1": "The People page lists everyone with an account, with their name, email address and role, and lets an admin change each role.",
+    "5.2": "Only admins can open the People page; anyone else sees \"Not allowed\" (403).",
+    "5.3": "Only admins can get the list of people through the API; anyone else is refused with \"Only admins can see people.\" (403).",
+    "5.4": "Only admins can change a person's role; anyone else is refused with \"Only admins can change roles.\" (403).",
+    "5.5": "A role is user, manager or admin; any other value is refused with \"Choose user, manager or admin.\" (API: 400).",
+    "5.6": "Changing the role of a person who does not exist is refused with \"Person not found.\" (API: 404).",
+    "5.7": "A changed role applies from the person's next request.",
+    "6.1": "The JSON API is described at /openapi.json, and every operation answers with the status codes described there.",
+    "6.2": "API operations other than registering, signing in and signing out answer 401 with \"Sign in first.\" to a visitor.",
+    "6.3": "API errors are JSON objects with an error message that can be shown to the person.",
+    "6.4": "Request bodies larger than 64 KB are ignored."
+   }
   }
  ]
 }

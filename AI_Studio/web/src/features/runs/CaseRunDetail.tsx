@@ -104,7 +104,7 @@ export function CaseRunDetail({ id, jobId, number }: { id: string; jobId: string
                             Progress
                         </h2>
                         <CaseStages job={job} />
-                        <LiveLine state={run.stream.state} latest={run.stream.latest} />
+                        <LiveLine state={run.stream.state} latest={run.stream.latest} queued={job.status === "QUEUED"} />
                     </section>
                 )}
 
