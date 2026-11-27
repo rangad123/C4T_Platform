@@ -181,6 +181,10 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
     const current = () => session.stop;
     let actions = 0;
 
+    // E6: the tokens budget is kept before a call, not one call after it. Each check comes just before an AI call (the caller's gate), so
+    // the tokens added between two checks are the calls made in between; the largest per-call amount seen is reserved for the next one.
+    let reserve = 0;
+    let last = { aiCalls: 0, tokens: 0 };
     /** Records and returns the session stop reason if one applies now. */
     const budgetStop = (): StopReason | null => {
         if (session.stop) return session.stop.reason;
@@ -189,8 +193,11 @@ export async function runExploration<O extends LoopObjective, R = unknown>(input
         else if (actions >= budgets.actions) stopSession("actions", `The session's limit of ${budgets.actions} actions was reached.`);
         else {
             const u = spent();
+            if (u.aiCalls > last.aiCalls) reserve = Math.max(reserve, (u.tokens - last.tokens) / (u.aiCalls - last.aiCalls));
+            last = u;
             if (u.aiCalls >= budgets.aiCalls) stopSession("ai_calls", `The session's limit of ${budgets.aiCalls} AI calls was reached.`);
             else if (u.tokens >= budgets.tokens) stopSession("tokens", `The session's limit of ${budgets.tokens} AI tokens was reached.`);
+            else if (u.tokens + reserve > budgets.tokens) stopSession("tokens", `The session's limit of ${budgets.tokens} AI tokens would be passed by the next AI call (about ${Math.ceil(reserve)} tokens; ${u.tokens} used).`);
         }
         return current()?.reason ?? null;
     };

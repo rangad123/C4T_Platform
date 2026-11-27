@@ -447,6 +447,41 @@ describe("runExploration: budgets are the loop's, not the objective's", () => {
         expect(r.usage.aiCalls).toBe(3);
     });
 
+    /** A pursuit that asks check() before each AI call, as the orchestrator's gate does, then makes the call (`sizes[i]` tokens). */
+    const caller = (fake: ReturnType<typeof world>, sizes: number[]) => async (ctx: ObjectiveContext) => {
+        for (const n of sizes) {
+            if (ctx.check()) break;
+            fake.w.aiCalls += 1;
+            fake.w.tokens += n;
+        }
+        return done();
+    };
+
+    it("E6 tokens: stops before the call that would pass the budget, not one call after it", async () => {
+        const fake = world();
+        // 7 calls of 1,000 tokens on a budget of 3,500: without a reserve the 4th call starts at 3,000 used and ends 500 over (the ladder's 0.05–0.34%).
+        const r = await run([obj("a", 1, { script: caller(fake, Array(7).fill(1_000)) })], { budgets: { ...BUDGETS, tokens: 3_500 } }, fake);
+        expect(r.stopReason).toBe("tokens");
+        expect(r.usage.tokens).toBe(3_000);
+        expect(r.usage.tokens).toBeLessThanOrEqual(3_500);
+        expect(r.stopDetail).toMatch(/would be passed by the next AI call/);
+    });
+
+    it("E6 tokens: a call that lands exactly on the budget is still made", async () => {
+        const fake = world();
+        const r = await run([obj("a", 1, { script: caller(fake, Array(7).fill(1_000)) })], { budgets: { ...BUDGETS, tokens: 4_000 } }, fake);
+        expect(r.stopReason).toBe("tokens");
+        expect(r.usage.tokens).toBe(4_000);
+    });
+
+    it("E6 tokens: the reserve is the largest call seen so far, not the last one", async () => {
+        const fake = world();
+        // At 2,200 used the last call was 100, which would allow the next 2,000-token call and end at 4,200; the largest (2,000) does not: 2,200 + 2,000 > 4,100.
+        const r = await run([obj("a", 1, { script: caller(fake, [100, 2_000, 100, 2_000]) })], { budgets: { ...BUDGETS, tokens: 4_100 } }, fake);
+        expect(r.stopReason).toBe("tokens");
+        expect(r.usage.tokens).toBe(2_200);
+    });
+
     it("check() reports a spent budget before the pursuit spends more", async () => {
         const fake = world();
         let seen: string | null = "unset";

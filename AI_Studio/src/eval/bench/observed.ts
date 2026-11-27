@@ -17,6 +17,9 @@
  *
  * Labels never change E1 or E2 and never count as detected; they only say which defect an observed-only finding saw.
  *
+ * A test the engine held for review without reporting it (`heldForReview`: the leftover check, or a replay the exploration's limits
+ * refused; orchestrator.ts keepAuthored) is in review but is no finding: it is left out of E1, E2 and E7 and counted in `held`.
+ *
  * And, from results written since P3-23 (an app's `exploration` record; absent in older results, then each is null = "not available",
  * never zero):
  *
@@ -61,6 +64,8 @@ export interface Observed {
     e1: Ratio;
     e2: Ratio;
     cleanNotRun: number;
+    /** Authoring tests in review that the engine said are not findings (`heldForReview`), left out of E1, E2 and E7. */
+    held: number;
     /** Seeded defects an observed-only finding was labelled with (sorted, distinct): seen while writing, not kept by the script. */
     observedDefects: string[];
     observedUnlabelled: number;
@@ -183,6 +188,13 @@ export function overBudget(s: ExplorationSession): string[] {
 }
 
 const failing = (v: ReplayVerdict | null | undefined): boolean => v === "failed" || v === "finding";
+
+/**
+ * A test the engine saved for review and said is not a finding: its reason starts as keepAuthored (orchestrator.ts) writes it for the
+ * leftover check ("Not reported as a finding: ..." for a defect, "Not validated: ..." for a complete test) and for a replay the
+ * exploration's limits refused. The harness collects every test in review, so these reach the result as authoring findings.
+ */
+export const heldForReview = (f: Pick<BenchFinding, "source" | "reason">): boolean => f.source === "authoring" && /^Not (reported as a finding|validated): /.test(f.reason ?? "");
 const ratio = (n: number, of: number): Ratio => ({ n, of, rate: of > 0 ? n / of : null });
 
 export function observedKind(f: BenchFinding): ObservedKind {
@@ -202,6 +214,7 @@ export function observedOf(b: Benchmark): Observed {
     let reproduced = 0;
     let isolated = 0;
     let cleanNotRun = 0;
+    let held = 0;
     let observedUnlabelled = 0;
     for (const a of b.apps) {
         for (const f of a.findings) {
@@ -213,6 +226,10 @@ export function observedOf(b: Benchmark): Observed {
                 else observedUnlabelled++;
             }
             if (f.source !== "authoring") continue;
+            if (heldForReview(f)) {
+                held++;
+                continue;
+            }
             authoring++;
             authorCapture[f.capture ?? "unrecorded"]++;
             if (!failing(f.replay.seeded)) continue;
@@ -225,7 +242,7 @@ export function observedOf(b: Benchmark): Observed {
     const available = recorded.length > 0;
     const sessions = recorded.flatMap((a) => a.exploration!.sessions);
     // Per objective and E7: the candidate findings of the apps that kept the record (an older app result in the same file has none).
-    const candidates = recorded.flatMap((a) => a.findings.filter((f) => f.source === "authoring" && f.candidate)).map((f) => f.candidate!);
+    const candidates = recorded.flatMap((a) => a.findings.filter((f) => f.source === "authoring" && f.candidate && !heldForReview(f))).map((f) => f.candidate!);
     const groups = new Map<string, { kind: string; operator: string; findings: number }>();
     const missing: Record<string, number> = {};
     for (const c of candidates) {
@@ -247,6 +264,7 @@ export function observedOf(b: Benchmark): Observed {
         e1: ratio(reproduced, authoring),
         e2: ratio(isolated, reproduced),
         cleanNotRun,
+        held,
         observedDefects: [...defects].sort(),
         observedUnlabelled,
         authorCapture,

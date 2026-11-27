@@ -76,6 +76,24 @@ describe("what each finding is, observed vs captured", () => {
         expect(o.observedDefects).toEqual(["BS-02"]);
         expect(o.observedUnlabelled).toBe(0);
         expect(o.authorCapture).toEqual({ captured: 1, observed_only: 1, unrecorded: 4 });
+        expect(o.held).toBe(0);
+    });
+
+    it("a test the engine held for review (leftover check, refused replay) is no finding: outside E1, E2 and E7, counted as held", () => {
+        // Reasons as keepAuthored writes them (orchestrator.ts); ladder L4 rbac-1 WEB-019 and shop-1 WEB-032 are of this kind.
+        const heldDefect = f("WEB-009", "authoring", { seeded: "failed", clean: "failed", single: {} }, { reason: "Not reported as a finding: the test opens /notes/n46, a record number the test never made.", candidate: { objective: null, missing: ["finding"] } });
+        const heldComplete = f("WEB-010", "authoring", { seeded: "finding", clean: "failed", single: {} }, { reason: "Not validated: the test counts 13 items, which its scenario does not give." });
+        // A reported finding whose reason merely mentions the words is still a finding.
+        const reported = f("WEB-011", "authoring", { seeded: "finding", clean: "passed", single: {} }, { reason: "The app said: Not validated yet", candidate: { objective: null, missing: [] } });
+        const all = [...FINDINGS, heldDefect, heldComplete, reported];
+        const b = bench(all);
+        const o = observedOf({ ...b, apps: [{ ...b.apps[0]!, exploration: { sessions: [] } }] });
+        expect(o.held).toBe(2);
+        expect(o.e1).toEqual({ n: 4, of: 7, rate: 4 / 7 });
+        expect(o.e2).toEqual({ n: 2, of: 4, rate: 0.5 });
+        expect(o.e7).toMatchObject({ n: 1, of: 1 });
+        // Still listed with its replays: only the E1 / E2 / E7 counts leave it out.
+        expect(o.rows.map((r) => r.testKey)).toContain("WEB-009");
     });
 
     it("no authoring findings: E1 and E2 have no rate, never 0%", () => {
