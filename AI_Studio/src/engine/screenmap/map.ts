@@ -154,6 +154,33 @@ export interface RoleCrawl {
     transitions: CrawlTransition[];
 }
 
+/** No more pages only test accounts reached are kept than this. */
+export const ROLE_PAGES_MAX = 50;
+
+/**
+ * The pages a test account reached whose screen the main crawl never saw (an admin's People page when the project signs in as a user),
+ * one per address pattern, with the accounts that reached it. Sign-in and error pages are left out, as the map leaves them out.
+ */
+export function rolePagesOf(main: PageModel[], roles: RoleCrawl[]): Array<PageModel & { reachedBy: string[] }> {
+    const index = new ScreenIndex(main);
+    const out = new Map<string, PageModel & { reachedBy: string[] }>();
+    for (const r of roles)
+        for (const p of r.pages) {
+            if (p.type === "error" || p.type === "login" || index.keyOf(p.url)) continue;
+            let pat: string;
+            try {
+                pat = urlPattern(norm(p.url));
+            } catch {
+                continue;
+            }
+            const kept = out.get(pat);
+            if (kept) {
+                if (!kept.reachedBy.includes(r.who)) kept.reachedBy.push(r.who);
+            } else if (out.size < ROLE_PAGES_MAX) out.set(pat, { ...p, reachedBy: [r.who] });
+        }
+    return [...out.values()];
+}
+
 /**
  * The map from the main crawl, each test account's crawl, and the conditional fields the crawl found in forms. Transitions to
  * addresses no visited page explains (a logout link, an unvisited page of a new template) are left out.

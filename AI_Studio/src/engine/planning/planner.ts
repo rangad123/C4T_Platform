@@ -85,6 +85,8 @@ export interface ObjectiveInputs extends ObjectiveModel {
     workflowSteps: Array<{ workflowId: string; steps: Array<{ order: number; action: string; page?: string; path?: string; endpoint?: string }> }>;
     /** What the caps left out, and a sentence saying so. */
     truncated?: { pages: number; fields: number; note: string };
+    /** Pages only some test accounts reached (the model's `reachableBy`): a pursuit there signs in as one of them (orchestrator.ts). */
+    accountPages?: Array<{ path: string; reachableBy: string[]; /** The links that lead to it ("People"): how a rule names the page. */ names?: string[] }>;
 }
 
 /** Caps on the objective inputs: pages with constrained fields, and constrained fields per page. */
@@ -97,7 +99,7 @@ const constrained = (f: ObjectiveField) =>
 const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The objective inputs of an analysed model and its usable workflows (see `ObjectiveInputs`), capped, in an order the model's does not change. */
-export function objectiveInputsOf(model: Pick<IntelModel, "pages" | "transitions">, workflows: ReadonlyArray<{ id: string; steps: ReadonlyArray<{ order: number; action: string; page?: string; endpoint?: string }> }>): ObjectiveInputs {
+export function objectiveInputsOf(model: Pick<IntelModel, "pages" | "transitions"> & { navigation?: IntelModel["navigation"] }, workflows: ReadonlyArray<{ id: string; steps: ReadonlyArray<{ order: number; action: string; page?: string; endpoint?: string }> }>): ObjectiveInputs {
     const L = OBJECTIVE_INPUT_LIMITS;
     let fieldsLeft = 0;
     const withForms = [...model.pages]
@@ -140,6 +142,14 @@ export function objectiveInputsOf(model: Pick<IntelModel, "pages" | "transitions
             }),
     }));
     const out: ObjectiveInputs = { pages, transitions, workflowSteps };
+    const accountPages = model.pages
+        .filter((p) => p.reachableBy?.length)
+        .slice(0, L.pages)
+        .map((p) => {
+            const names = [...new Set((model.navigation ?? []).filter((n) => n.to === p.id && n.control.trim()).map((n) => n.control.trim()))].slice(0, 5);
+            return { path: p.path, reachableBy: [...p.reachableBy!], ...(names.length ? { names } : {}) };
+        });
+    if (accountPages.length) out.accountPages = accountPages;
     if (pagesLeft || fieldsLeft)
         out.truncated = { pages: pagesLeft, fields: fieldsLeft, note: `${pagesLeft} pages and ${fieldsLeft} form fields were left out of the objectives for length.` };
     return out;

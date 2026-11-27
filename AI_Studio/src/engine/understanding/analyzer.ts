@@ -109,19 +109,25 @@ API calls observed or documented:
 ${apiText}`;
     const pagesText = (pages: PageModel[]) =>
         `${opts.reuse?.pages.size ? `${REUSE_NOTE}\n` : ""}${summarisePages(pages, undefined, opts.reuse, opts.digestElementsPerPage)}${opts.memory ? `\n\n${opts.memory}` : ""}${withNotes(opts.notes, pages)}`;
+    // Pages only test accounts reached (an admin's page when the project signs in as a user): listed apart, with who reached them, so a
+    // journey through one can be named; their purposes come back like the others'.
+    const rolePages = base.rolePages ?? [];
+    const roleText = rolePages.length
+        ? `\n\nPages only some of the project's test accounts reached (${rolePages.length}); a journey through one is done signed in as an account that reached it:\n${rolePages.map((p) => `${p.path}: reached by ${p.reachedBy.map((w) => JSON.stringify(w.slice(0, 100))).join(", ")}`).join("\n")}\n${summarisePages(rolePages, 10_000, undefined, opts.digestElementsPerPage)}`
+        : "";
     let analysis: Analysis | LinkedAnalysis;
     try {
         analysis = await ctx.llm.object({
             system,
             schema,
             // One purpose line per page: a larger exploration needs room for all of them.
-            maxOutputTokens: Math.min(16_000, 6_000 + 40 * base.pages.length),
+            maxOutputTokens: Math.min(16_000, 6_000 + 40 * (base.pages.length + rolePages.length)),
             purpose: "analysis",
             cacheAs: "understanding",
             prompt: `${head}
 
 Pages (${base.pages.length}):
-${pagesText(base.pages)}`,
+${pagesText(base.pages)}${roleText}`,
         });
     } catch (err) {
         // The whole answer was unusable even after the re-ask (too long, as a rule): asked again in smaller parts (task R, R-e).
@@ -137,7 +143,11 @@ ${pagesText(base.pages)}`,
         const known = opts.reuse?.pages.get(p.path);
         return known ? { ...p, type: known.type, ...(known.purpose ? { purpose: known.purpose } : {}) } : p;
     });
-    const known = new Set(pages.map((p) => p.path.split("?")[0]));
+    const withPurpose = <P extends PageModel>(p: P): P => {
+        const hit = byPath.get(p.path);
+        return hit ? { ...p, type: hit.type, purpose: hit.purpose } : p;
+    };
+    const known = new Set([...pages, ...rolePages].map((p) => p.path.split("?")[0]));
 
     ctx.emit({
         stage: "analysis",
@@ -152,6 +162,7 @@ ${pagesText(base.pages)}`,
     return {
         ...base,
         pages,
+        ...(rolePages.length ? { rolePages: rolePages.map(withPurpose) } : {}),
         siteType: analysis.siteType,
         purpose: analysis.purpose,
         features: analysis.features,

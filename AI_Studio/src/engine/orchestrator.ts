@@ -50,7 +50,7 @@ import { reuseMessage } from "./memory/reuse.js";
 import { ProbeReuse, type KnownApis, type KnownPages } from "./memory/probe-reuse.js";
 import { EVENT_PAGES_REUSED, explorationReuseOn } from "./llm/without-ai.js";
 import { levelSettings, visionOn, type ExplorationBudgets, type ExploreLevel } from "./levels.js";
-import { buildScreenMap, coverWithTests, type CrawlTransition, type RoleCrawl } from "./screenmap/map.js";
+import { buildScreenMap, coverWithTests, rolePagesOf, type CrawlTransition, type RoleCrawl } from "./screenmap/map.js";
 import { asRole, roleCredentials, roleDifferences } from "./identity/role-differences.js";
 import { refusedBy } from "./memory/notes.js";
 import { createTestData } from "./testdata/generate.js";
@@ -729,6 +729,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     documentedTestCases,
                     stats: { pagesVisited: pages.length, pagesSkipped: skipped, apisFound: apis.length, durationMs: Date.now() - started },
                     ...(wantWeb && pages.length ? { screenMap: buildScreenMap({ pages, transitions: crawlTransitions }, roleCrawls) } : {}),
+                    // The pages only a test account reached: the model of the application holds them, with who can open them.
+                    ...((rolePages) => (rolePages.length ? { rolePages } : {}))(wantWeb ? rolePagesOf(pages, roleCrawls) : []),
                 }, authoringSecretsOf(req));
                 await sink.counters({ pagesDiscovered: pages.length, apisDiscovered: apis.length });
                 await sink.saveModel({ ...base, siteType: "unknown", purpose: "", features: [], journeys: [] });
@@ -1088,9 +1090,12 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     });
                     return h.testId;
                 }
-                const own: IndependenceReplay | undefined =
+                // Row 173: where a replay stops (or, for the own-steps replay, its last page), a picture with the secret fields covered (as the
+                // Explorer view's) is kept as the finding's evidence. Taken in the replay's own fresh browser: nothing of the tool is on the page.
+                const shoot = sink.saveImageArtifact ? findingShooter(sink.saveImageArtifact.bind(sink), authoringSecretsOf(req), key) : undefined;
+                const own: (IndependenceReplay & { screenshot?: string }) | undefined =
                     capture === "observed_only"
-                        ? await replayOwnSteps(browser, origin, replayed, { prepare }).catch((e: unknown) => {
+                        ? await replayOwnSteps(browser, origin, replayed, { prepare, ...(shoot ? { shoot } : {}) }).catch((e: unknown) => {
                               let m = (e instanceof Error ? e.message : String(e)).split("\n")[0]!.trim().slice(0, 300);
                               for (const s of replaySecrets) m = m.split(s).join("***");
                               return { label: "Replay of the saved test in a fresh browser", outcome: "error" as const, summary: `the replay threw: ${m}` };
@@ -1114,13 +1119,20 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     });
                     return h.testId;
                 }
-                // Row 173: where a replay stops, a picture with the secret fields covered (as the Explorer view's) is kept as the finding's evidence.
-                const shoot = sink.saveImageArtifact ? findingShooter(sink.saveImageArtifact.bind(sink), authoringSecretsOf(req), key) : undefined;
-                const independence =
+                const checked: IndependenceCheck =
                     // Two fresh replays of the saved steps.
                     capture === "captured" && replayAllowed(2 * written.steps.length, "the two fresh replays of the independence check")
                         ? await checkIndependence(browser, origin, replayed, { prepare, ...(shoot ? { shoot } : {}) }).catch(() => ({ independence: "not_run" as const, replays: [] }))
                         : { independence: "not_run" as const, replays: [] };
+                // No picture yet (an observed-only test, or the independence check did not run or kept none): the own-steps replay's, else one
+                // more replay of the saved steps that only takes it, when the exploration's limits allow it.
+                const picture = checked.screenshots?.length
+                    ? undefined
+                    : (own?.screenshot ??
+                      (shoot && capture === "captured" && replayAllowed(written.steps.length, "the replay that takes the finding's picture")
+                          ? (await replayOwnSteps(browser, origin, replayed, { prepare, shoot }).catch(() => undefined))?.screenshot
+                          : undefined));
+                const independence = picture ? { ...checked, screenshots: [picture] } : checked;
                 const found = defectFinding({ scenario, rules: scenarioRules, requirementIds, outcome, capture, independence, stepCount: spec.steps.length, modelVersion: req.appKnowledge?.modelVersionId ?? null });
                 // What the API's own answers say about an amount the failing check expects (findings/expectation.ts, read at verification).
                 const apiAmount = apiOnAmount(written.steps, outcome.capturedCheck?.source, outcome.calls);
@@ -1282,7 +1294,10 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     };
                     const rules = p.objective.kind === "rule" ? usableRules(knowledge.rules).filter((r) => r.ref === p.objective.source.ref) : rulesForScenario(p.scenario, knowledge);
                     const runId = await sink.startAgentRun("web-authoring", `${p.scenario.scenarioId} ${p.scenario.title}`);
-                    const as = await authoringAccount(p.scenario, { objective: true, roleAccount: false, signsInAsMain: requiresAuth });
+                    // A page only another test account reached: the pursuit signs in as that account, and its test runs as it (asRole).
+                    const accountName = requiresAuth ? pursuitAccount(pursuitPaths(p, knowledge.objectiveInputs!), knowledge.objectiveInputs!.accountPages ?? [], req.roles, creds?.username) : undefined;
+                    const roleAs = accountName ? roleCredentials({ role: accountName }, req.roles, creds?.username) : undefined;
+                    const as = await authoringAccount(p.scenario, { objective: true, roleAccount: Boolean(roleAs), signsInAsMain: requiresAuth && !roleAs });
                     let outcome: AuthorOutcome;
                     try {
                         outcome = await authorWebSpec({
@@ -1291,7 +1306,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                             baseUrl: origin,
                             model,
                             scenario: as.scenario,
-                            credentials: as.credentials ?? (requiresAuth ? creds : undefined),
+                            credentials: roleAs?.credentials ?? as.credentials ?? (requiresAuth ? creds : undefined),
                             onAction: (a) => sink.agentAction(runId, a),
                             gate: actionGate,
                             // The objective's step budget holds across every pass of this pursuit, not per pass (CP2 M-5).
@@ -1326,7 +1341,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                         ctx.emit({ stage: "generation", kind: "operator_not_applied", level: "warn", message: `${p.scenario.scenarioId}: the recorded steps do not apply the operator "${p.operator}", so no test was saved for it.` });
                         return { status: "completed", result: { applied: false, authoring: outcome.status } };
                     }
-                    const testKey = await keepAuthored(as.scenario, outcome, undefined, rules, actionGate.replay);
+                    const testKey = await keepAuthored(as.scenario, outcome, roleAs, rules, actionGate.replay);
                     saved.push({ objective: { id: p.objective.id, operator: p.operator }, steps: outcome.steps });
                     return { status: "completed", result: { applied: true, authoring: outcome.status, testKey } };
                 };
@@ -2013,6 +2028,13 @@ export function objectivePursuits(
             // Steps name pages by the model's id; the scenario's start and a direct URL need the page's address.
             if (wf) options.workflow = { preconditions: wf.preconditions ?? [], steps: paged ? paged.map((s) => ({ order: s.order, action: s.action, ...pageAddressOf(s, inputs.pages) })) : wf.steps };
         }
+        if (o.kind === "rule") {
+            // A rule about a page only another test account reached ("The People page lets an admin change each role") starts there, so
+            // its pursuit signs in as that account (pursuitAccount) instead of looking for the page as the project's own account.
+            const rule = k.rules.find((r) => r.ref === o.source.ref);
+            const at = rule ? ruleStartPath(`${rule.description} ${rule.expected}`, inputs.accountPages ?? []) : undefined;
+            if (at) options.startPath = at;
+        }
         if (o.kind === "constraint") {
             const field = fields.get(o.source.ref);
             if (field) options.inputClasses = inputClassesFor(field, o.source.ref);
@@ -2035,6 +2057,45 @@ export function objectivePursuits(
         }
     }
     return { objectives, overCap, pursuits, skipped };
+}
+
+/**
+ * The test account a pursuit signs in as when a page it works on (its start and, for a workflow, its steps' pages) is one the project's own
+ * account did not reach but other test accounts did (objective inputs `accountPages`: an admin's People page when the project signs in as
+ * a user): the first of the project's accounts that reached every such page. Undefined when the project's own account reaches them, when
+ * it is not one of the test accounts (who reaches what is then not known for it), or when no single account reaches them all.
+ */
+export function pursuitAccount(paths: readonly string[], accountPages: ReadonlyArray<{ path: string; reachableBy: readonly string[] }>, roles: ReadonlyArray<{ name: string; username: string }> | undefined, mainUsername: string | undefined): string | undefined {
+    const main = roles?.find((r) => r.username === mainUsername)?.name;
+    if (!roles || !main) return undefined;
+    const at = new Set(paths.map((p) => pathPattern(p)));
+    const away = accountPages.filter((a) => at.has(pathPattern(a.path)) && !a.reachableBy.includes(main));
+    if (!away.length) return undefined;
+    return roles.find((r) => r.name !== main && away.every((a) => a.reachableBy.includes(r.name)))?.name;
+}
+
+/**
+ * The page a rule is about when its words name a page only some test accounts reached, by a link that leads there ("the People page"):
+ * that page's address when exactly one such page is named; undefined otherwise. Names are page data, matched as whole words, never run.
+ */
+export function ruleStartPath(text: string, accountPages: ReadonlyArray<{ path: string; names?: readonly string[] }>): string | undefined {
+    const t = text.toLowerCase();
+    const named = (n: string) => {
+        const w = n.trim().toLowerCase();
+        if (w.length < 3 || w.length > 60) return false;
+        const i = t.indexOf(w);
+        const word = (c: string | undefined) => c === undefined || !/[\p{L}\p{N}]/u.test(c);
+        for (let k = i; k >= 0; k = t.indexOf(w, k + 1)) if (word(t[k - 1]) && word(t[k + w.length])) return true;
+        return false;
+    };
+    const hits = accountPages.filter((p) => (p.names ?? []).some(named));
+    return hits.length === 1 ? hits[0]!.path : undefined;
+}
+
+/** The addresses a pursuit works on: where it starts and, for a workflow, the page of each stated step. */
+function pursuitPaths(p: ObjectivePursuit, inputs: NonNullable<AppKnowledge["objectiveInputs"]>): string[] {
+    const steps = p.objective.kind === "workflow" ? (inputs.workflowSteps.find((w) => normRef(w.workflowId) === normRef(p.objective.source.ref))?.steps ?? []) : [];
+    return [p.scenario.startPath, ...steps.flatMap((s) => (s.path ? [s.path] : []))];
 }
 
 /**

@@ -11,7 +11,7 @@ import type { Browser } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { launchChromium } from "../src/engine/discovery/browser.js";
 import { CandidateFindingSchema } from "../src/engine/explore/finding.js";
-import { checkIndependence } from "../src/engine/explore/independence.js";
+import { checkIndependence, replayOwnSteps } from "../src/engine/explore/independence.js";
 import { defectFinding, FINDING_SCREENSHOTS_MAX, findingShooter } from "../src/engine/orchestrator.js";
 import { ScenarioSchema, TestSpecSchema, type Step } from "../src/engine/spec/schema.js";
 import type { AuthorOutcome } from "../src/engine/web/author.js";
@@ -116,6 +116,23 @@ describe("a finding's screenshots", () => {
 
         const found = defectFinding({ scenario, rules: [], outcome, capture: "captured", independence: r, stepCount: steps.length, modelVersion: null });
         expect(CandidateFindingSchema.parse(found.finding).evidence.screenshots).toEqual(["artifact-1", "artifact-2"]);
+    }, 60_000);
+
+    it("an own-steps replay (an observed-only finding, or one whose independence check kept no picture) keeps a picture of its last page, covered", async () => {
+        const saved: Uint8Array[] = [];
+        const shoot = findingShooter(async (_kind, _name, jpeg) => (saved.push(jpeg), `artifact-${saved.length}`), [STORED], "WEB-008");
+        // Every step passes: the picture is of the page the test ended on.
+        const passed = await replayOwnSteps(browser, BASE, { steps: steps.slice(0, 3) }, { shoot });
+        expect(passed).toMatchObject({ outcome: "passed", screenshot: "artifact-1" });
+        // It stops at the check: the picture is of where it stopped.
+        expect(await replayOwnSteps(browser, BASE, { steps }, { shoot, stepTimeoutMs: 5_000 })).toMatchObject({ outcome: "failed", failedStep: 4, screenshot: "artifact-2" });
+        const scale = (await look(saved[0]!, { x: 0, y: 0, w: 1, h: 1 })).width / 1280;
+        expect(covered(await look(saved[0]!, inner(PASSWORD_BOX, scale))), "password field covered").toBe(true);
+        expect(covered(await look(saved[0]!, inner(NOTE_BOX, scale))), "field holding a stored secret covered").toBe(true);
+        // Without a shooter it takes none.
+        expect(await replayOwnSteps(browser, BASE, { steps: steps.slice(0, 3) })).not.toHaveProperty("screenshot");
+        const found = defectFinding({ scenario, rules: [], outcome: { ...outcome, capture: "observed_only" }, capture: "observed_only", independence: { independence: "not_run", replays: [], screenshots: [passed.screenshot!] }, stepCount: 3, modelVersion: null });
+        expect(CandidateFindingSchema.parse(found.finding).evidence.screenshots).toEqual(["artifact-1"]);
     }, 60_000);
 
     it("a picture that cannot be taken or stored is left out, and the check stands", async () => {

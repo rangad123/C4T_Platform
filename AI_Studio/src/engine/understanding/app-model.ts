@@ -116,7 +116,7 @@ export interface ApiEndpointModel {
     requestSchema?: Record<string, unknown>;
     responseSchema?: Record<string, unknown>;
     sampleRequestBody?: unknown;
-    /** First concrete path+query observed on the wire (ids intact) — lets happy-path tests replay a real request. */
+    /** First concrete path+query observed on the wire (ids intact) ï¿½ lets happy-path tests replay a real request. */
     examplePath?: string;
     queryParams: string[];
     requiresAuth?: boolean;
@@ -196,6 +196,11 @@ export interface AppModel {
     mobile?: import("../mobile/explore/types.js").MobileAppModel;
     /** Screens and the actions that lead between them (see ../screenmap/map.ts). Absent on models stored before it existed. */
     screenMap?: import("../screenmap/map.js").ScreenMap;
+    /**
+     * Pages only the project's test accounts reached (an admin's page when the project signs in as a user), with who reached them
+     * (../screenmap/map.ts rolePagesOf). Not part of `pages`: checks made from `pages` run as the project's own account. Absent on older models.
+     */
+    rolePages?: Array<PageModel & { reachedBy: string[] }>;
 }
 
 /** Schema the analyzer asks the LLM to fill in. */

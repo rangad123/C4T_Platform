@@ -166,11 +166,16 @@ export function fragmentFromExploration(src: ExplorationSource): ModelFragment {
         };
     };
     const pages: AppModel["pages"] = [];
-    for (const p of m.pages.slice(0, 2000)) {
-        if (ids.has(p.path)) continue;
+    const knownPattern = (path: string) => [...ids.keys()].some((x) => patternOf(x) === patternOf(path));
+    // Who can open a page only test accounts reached: the survey when it is given, else the accounts the exploration recorded.
+    const onlyBy = (path: string, who: readonly string[]) => {
+        const a = access(path);
+        return a.reachableBy || !who.length ? a : { ...a, reachableBy: who.slice(0, 20).map((w) => cut(w, 100)) };
+    };
+    const pageOf = (p: PageModel, extra: ReturnType<typeof access>): AppModel["pages"][number] => {
         ids.set(p.path, `page:${cut(p.path, 95)}`);
         const screenId = screenOf(p.path);
-        pages.push({
+        return {
             id: pageId(p.path),
             path: cut(p.path, 500),
             purpose: cut(p.purpose, 500),
@@ -180,7 +185,18 @@ export function fragmentFromExploration(src: ExplorationSource): ModelFragment {
             forms: p.forms.slice(0, 30).map((f) => ({ name: cut(f.id ?? f.purpose, 200), fields: f.fields.slice(0, 100).map(field) })),
             structures: structures(p),
             interactions: (p.interactions ?? []).slice(0, 200).map((i) => ({ control: cut(i.control, 200), method: cut(i.method, 10), path: cut(i.path, 500) })),
-        });
+            ...extra,
+        };
+    };
+    for (const p of m.pages.slice(0, 2000)) if (!ids.has(p.path)) pages.push(pageOf(p, {}));
+    // Pages only a test account reached (an admin's page when the project signs in as a user), with what the account saw on them.
+    for (const p of m.rolePages ?? []) if (!knownPattern(p.path) && pages.length < 2000) pages.push(pageOf(p, onlyBy(p.path, p.reachedBy)));
+    // A model from before rolePages: the screen map still names them and who reached them (no forms or controls).
+    for (const sc of m.screenMap?.screens ?? []) {
+        const path = sc.paths[0];
+        if (!path || !sc.roles?.length || knownPattern(path) || pages.length >= 2000) continue;
+        ids.set(path, `page:${cut(path, 95)}`);
+        pages.push({ id: pageId(path), path: cut(path, 500), purpose: "", elements: [], screenId: cut(sc.key, 100), ...onlyBy(path, sc.roles), forms: [], structures: [], interactions: [] });
     }
     for (const r of accounts)
         for (const rp of r.pages) {
@@ -199,6 +215,16 @@ export function fragmentFromExploration(src: ExplorationSource): ModelFragment {
         .filter((n) => ids.has(n.from) && ids.has(n.to))
         .slice(0, 5000)
         .map((n) => ({ from: pageId(n.from), to: pageId(n.to), control: cut(n.label, 200), evidence: [{ kind: "page", ref: cut(n.from, 500) }] }));
+    // How a test account got to a page only it reached (the admin's "People" link): from the screen map, which keeps each account's links.
+    const pathOfScreen = new Map((m.screenMap?.screens ?? []).map((sc) => [sc.key, sc.paths[0]]));
+    const onlyByAccounts = new Set(pages.filter((p) => p.reachableBy?.length && !m.pages.some((c) => c.path === p.path)).map((p) => p.path));
+    for (const t of m.screenMap?.transitions ?? []) {
+        const from = pathOfScreen.get(t.from);
+        const to = pathOfScreen.get(t.to);
+        if (!from || !to || !onlyByAccounts.has(to) || !ids.has(from) || navigation.length >= 5000) continue;
+        if (navigation.some((n) => n.from === pageId(from) && n.to === pageId(to) && n.control === cut(t.action, 200))) continue;
+        navigation.push({ from: pageId(from), to: pageId(to), control: cut(t.action, 200), evidence: [{ kind: "page", ref: cut(from, 500) }] });
+    }
 
     // Endpoints: traffic is "observed"; an OpenAPI entry is "documented" with the document's path; one only named in site docs is neither.
     const endpoints: Endpoint[] = [];

@@ -185,6 +185,8 @@ async function replay(
     shoot?: IndependenceOptions["shoot"],
     captured?: number,
     account: ReplayAccount = { clean: true, note: "" },
+    /** Also a picture of the last page when every step passed. */
+    shootAtEnd = false,
 ): Promise<IndependenceReplay & { screenshot?: string; notReached?: boolean; failure?: FailureKind; clean: boolean }> {
     // A replay as a newly registered account signs in with that account's credentials (clean-account.ts); its summary says who it was.
     const credentials = account.credentials ?? test.credentials;
@@ -224,7 +226,8 @@ async function replay(
                 return { label, outcome: "failed", failedStep: i + 1, summary: `${who}: stopped at step ${i + 1} (${describeStep(step)}), ${what}: ${cleanMessage(e, secrets)}`, ...(screenshot ? { screenshot } : {}), ...(e instanceof NotReached ? { notReached: true } : {}), failure, clean };
             }
         }
-        return { label, outcome: "passed", summary: `${who}: all ${test.steps.length} steps passed; the defect did not show.`, clean };
+        const screenshot = shoot && shootAtEnd ? await within(shoot(session.page), SHOT_MS).catch(() => undefined) : undefined;
+        return { label, outcome: "passed", summary: `${who}: all ${test.steps.length} steps passed; the defect did not show.`, ...(screenshot ? { screenshot } : {}), clean };
     } finally {
         await session.close();
     }
@@ -236,9 +239,14 @@ async function replay(
  * pass its own steps (a check bound to a value the authoring session saw, a step leaning on state the session left): it is a broken
  * test, not evidence of a defect (queue row 180, C1c's WEB-027/030/033/046). No AI calls.
  */
-export async function replayOwnSteps(browser: Browser, baseUrl: string, test: DefectTest, opts: { stepTimeoutMs?: number; prepare?: IndependenceOptions["prepare"] } = {}): Promise<IndependenceReplay & { clean: boolean }> {
+export async function replayOwnSteps(
+    browser: Browser,
+    baseUrl: string,
+    test: DefectTest,
+    opts: { stepTimeoutMs?: number; prepare?: IndependenceOptions["prepare"]; /** A picture of the page where the replay stopped, or of its last page when every step passed (the finding's evidence). */ shoot?: IndependenceOptions["shoot"] } = {},
+): Promise<IndependenceReplay & { clean: boolean; screenshot?: string }> {
     const account = await accountFor(test, opts.prepare);
-    const { screenshot: _s, notReached: _n, failure: _f, ...r } = await replay(browser, baseUrl, test, "Replay of the saved test in a fresh browser", opts.stepTimeoutMs ?? STEP_TIMEOUT_MS, undefined, undefined, account);
+    const { notReached: _n, failure: _f, ...r } = await replay(browser, baseUrl, test, "Replay of the saved test in a fresh browser", opts.stepTimeoutMs ?? STEP_TIMEOUT_MS, opts.shoot, undefined, account, true);
     return r;
 }
 
