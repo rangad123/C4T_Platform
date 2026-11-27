@@ -32,7 +32,7 @@ const api = (title: string, method: string, p: string, priority = "medium") => (
 function recordRun(testId: string, status: string, daysAgo: number) {
     const scriptId = (platform.repo.getCurrentScript(testId) as { id: string } | undefined)?.id ?? null;
     const execId = platform.repo.addExecution({ testId, scriptId, jobId: null, attempt: 1, status, durationMs: 500, startedAt: new Date(Date.now() - daysAgo * 86_400_000).toISOString(), steps: [] });
-    platform.db.run("UPDATE test_executions SET test_version_id = (SELECT id FROM test_versions WHERE test_case_id = ? AND state = 'approved' ORDER BY version DESC LIMIT 1) WHERE id = ?", testId, execId);
+    platform.db.run("UPDATE test_executions SET finished_at = started_at, test_version_id = (SELECT id FROM test_versions WHERE test_case_id = ? AND state = 'approved' ORDER BY version DESC LIMIT 1) WHERE id = ?", testId, execId);
 }
 const jobTests = (jobId: string) => [...(platform.repo.getJob(jobId)!.options.testIds ?? [])].sort();
 
