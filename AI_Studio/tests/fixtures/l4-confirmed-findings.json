@@ -1,0 +1,3278 @@
+{
+ "source": "paid ladder L4 trial databases (candidate_findings + test_cases rows of Confirmed findings; ids as stored)",
+ "cases": [
+  {
+   "trial": "shop-4",
+   "testKey": "WEB-004",
+   "label": "fp",
+   "finding": {
+    "id": "ca824bf6-5345-4dc4-8098-3d8f07659033",
+    "fingerprint": "0bbf1797e0ae65b066a1f89b61ebd1bfc01073e676f35d6d681ae2d3a4f20a68",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 3
+     },
+     "expected": {
+      "text": "The Add to cart button is visible (requirement 1.1)",
+      "source": "expected:3"
+     },
+     "observed": "On /products/p5 (Water Bottle) opened as a signed-out visitor, the heading \"Water Bottle\" and price $18.00 are shown (expected 1 met). However, no Quantity number field is shown (expected 2 not met), and no Add to cart button is shown (expected 3 not met). Instead the page shows the text \"Sign in to buy.\" with a link to /login?next=/products/p5. Discovery notes list the Quantity field and Add to cart button on this page, so they appear only for signed-in users, not for visitors as the scenario requires (requirement 1.1).",
+     "evidence": {
+      "screenshots": [
+       "9316b986-5bd9-4fde-8445-a2ec73b5b86b",
+       "aa4afd5d-5bb8-4b42-8938-b3909d5a5c01"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "0bbf1797e0ae65b066a1f89b61ebd1bfc01073e676f35d6d681ae2d3a4f20a68",
+     "modelVersion": "697aaea5-0ed0-4cd5-897a-1720c7bad087",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 3,
+       "summary": "Replay 1 in a fresh browser: stopped at step 3 (Verify visible of button \"Add to cart\"), the check of expected:3: expect(locator).toBeVisible() failed"
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 3,
+       "summary": "Replay 2 in a fresh browser: stopped at step 3 (Verify visible of button \"Add to cart\"), the check of expected:3: expect(locator).toBeVisible() failed"
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T05:51:31.231Z",
+    "testId": "248a809a-2cd2-475b-b786-7508ea3ee09c",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 3,
+     "check": "visible",
+     "target": "Add to cart",
+     "error": "Error: 3. Verify visible of button \"Add to cart\"\n\nexpect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Add to cart', exact: true })\nExpected: visible",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/products/p5",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 3,
+     "check": "visible",
+     "target": "Add to cart",
+     "error": "Error: 3. Verify visible of button \"Add to cart\"\n\nexpect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Add to cart', exact: true })\nExpected: visible",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/products/p5",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 3,
+     "check": "visible",
+     "target": "Add to cart",
+     "error": "Error: 3. Verify visible of button \"Add to cart\"\n\nexpect(locator).toBeVisible() failed\n\nLocator: getByRole('button', { name: 'Add to cart', exact: true })\nExpected: visible",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/products/p5",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "248a809a-2cd2-475b-b786-7508ea3ee09c",
+    "title": "Open each product detail page as a visitor",
+    "spec": {
+     "testId": "WEB-004",
+     "title": "Open each product detail page as a visitor",
+     "description": "A visitor opens the Water Bottle product page and sees its name, quantity field and Add to cart button.",
+     "kind": "web",
+     "category": "Catalogue",
+     "type": "functional",
+     "priority": "high",
+     "preconditions": [],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/products/p5",
+       "description": "Open /products/p5"
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "role",
+        "role": "heading",
+        "value": "Water Bottle"
+       },
+       "source": "expected:1",
+       "description": "Verify visible of heading \"Water Bottle\""
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Add to cart",
+        "exact": true
+       },
+       "source": "expected:3",
+       "description": "Verify visible of button \"Add to cart\""
+      }
+     ],
+     "expectedResults": [
+      "The heading Water Bottle is shown with its price",
+      "A Quantity number field is visible with its value set to 1",
+      "The Add to cart button is visible (requirement 1.1)"
+     ],
+     "testData": {},
+     "tags": [
+      "functional",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-002",
+      "journey": "Browse product catalogue",
+      "origin": "browser-agent",
+      "requirements": [
+       "1.1"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": "The product page for p5 renders the heading and price but the Add to cart button is absent; the page shows only a 'Sign in to buy' link, indicating the button is hidden for anonymous visitors. The test expects the button to be visible to a visitor, so the application behaviour (or the expectation for visitors) is at fault, not the locator."
+   },
+   "requirements": {
+    "1.1": "Anyone can browse the product list and every product page without signing in."
+   }
+  },
+  {
+   "trial": "shop-1",
+   "testKey": "WEB-025",
+   "label": "fp",
+   "finding": {
+    "id": "5df73b2a-381a-471e-bfda-979a3751e367",
+    "fingerprint": "f2c2b98f470f7e30cc39a73d21a94e7776d16f61e2384d2f679d8fc0a7abb75e",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 10
+     },
+     "expected": {
+      "text": "The main navigation shows Sign out and the new name without any Sign in step (requirement 1.10.a)",
+      "source": "expected:1"
+     },
+     "observed": "Registering a new account (name \"Priya Patel {{unique}}\", unique email, valid 8+ char password) succeeded. Expected result 2 passed: the app left /register and landed on the catalog page at / (Products). Expected result 1 partly passed: the main navigation shows \"Sign out\" and no \"Sign in\" link, so the user is signed in without a separate sign-in step. However, the main navigation does not show the new name. The name appears only on the Account page (/account, \"Your account\", Name field \"Priya Patel ...\"), where the page says \"Signed in as\" with the email hidden. The navigation text check for \"Priya Patel\" failed on the Account page. The Account page also showed an empty Default delivery address, which matches the rule that a new account has no default delivery address.",
+     "evidence": {
+      "screenshots": [
+       "3728841a-070e-472a-9fff-24cd89c0fa05",
+       "0c30b987-e98d-4716-a193-72fb8cf279c5"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "f2c2b98f470f7e30cc39a73d21a94e7776d16f61e2384d2f679d8fc0a7abb75e",
+     "modelVersion": "16daa1b9-013b-47fd-8b6d-ff80a7ebbdb1",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 10,
+       "summary": "Replay 1 in a fresh browser: stopped at step 10 (Verify text of navigation \"Main\" = Priya Patel), the check of expected:1: expect(locator).toContainText(expected) failed. It saw the same value as when captured (Products Cart Orders Account Sign out)."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 10,
+       "summary": "Replay 2 in a fresh browser: stopped at step 10 (Verify text of navigation \"Main\" = Priya Patel), the check of expected:1: expect(locator).toContainText(expected) failed. It saw the same value as when captured (Products Cart Orders Account Sign out)."
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-25T18:08:45.457Z",
+    "testId": "a4ab0628-fb90-4899-a6ef-ecd2c2c553af",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "text",
+     "target": "Main",
+     "value": "Priya Patel",
+     "error": "Error: 10. Verify text of navigation \"Main\" = Priya Patel\n\nexpect(locator).toContainText(expected) failed\n\nLocator: getByRole('navigation', { name: 'Main' })\nExpected substring: \"Priya Patel\"",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "text",
+     "target": "Main",
+     "value": "Priya Patel",
+     "error": "Error: 10. Verify text of navigation \"Main\" = Priya Patel\n\nexpect(locator).toContainText(expected) failed\n\nLocator: getByRole('navigation', { name: 'Main' })\nExpected substring: \"Priya Patel\"",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "text",
+     "target": "Main",
+     "value": "Priya Patel",
+     "error": "Error: 10. Verify text of navigation \"Main\" = Priya Patel\n\nexpect(locator).toContainText(expected) failed\n\nLocator: getByRole('navigation', { name: 'Main' })\nExpected substring: \"Priya Patel\"",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "a4ab0628-fb90-4899-a6ef-ecd2c2c553af",
+    "title": "New account is signed in straight after registering",
+    "spec": {
+     "testId": "WEB-025",
+     "title": "New account is signed in straight after registering",
+     "description": "Complete the registration form with unique data and check the signed-in state without a separate sign in step.",
+     "kind": "web",
+     "category": "Authentication",
+     "type": "workflow",
+     "priority": "critical",
+     "preconditions": [],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/register",
+       "description": "Open /register"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "Priya Patel {{unique}}",
+       "description": "Enter \"Priya Patel {{unique}}\" into label \"Name\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "priya.patel.{{unique}}@example.com",
+       "description": "Enter \"priya.patel.{{unique}}@example.com\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "Tq7!{{unique}}-Zx4",
+       "description": "Enter \"Tq7!{{unique}}-Zx4\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Click button \"Create account\""
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "url",
+       "value": "/",
+       "locator": {
+        "by": "role",
+        "value": "navigation"
+       },
+       "description": "Wait until the address matches \"/\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Account",
+        "exact": true
+       },
+       "description": "Click link \"Account\""
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign out",
+        "exact": true
+       },
+       "source": "expected:1",
+       "description": "Verify visible of button \"Sign out\""
+      },
+      {
+       "action": "assert",
+       "check": "count",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Sign in",
+        "exact": true
+       },
+       "expected": 0,
+       "source": "expected:1",
+       "description": "Verify count of link \"Sign in\" = 0"
+      },
+      {
+       "action": "assert",
+       "check": "text",
+       "locator": {
+        "by": "role",
+        "role": "navigation",
+        "value": "Main"
+       },
+       "expected": "Priya Patel",
+       "source": "expected:1",
+       "description": "Verify text of navigation \"Main\" = Priya Patel"
+      }
+     ],
+     "expectedResults": [
+      "The main navigation shows Sign out and the new name without any Sign in step (requirement 1.10.a)",
+      "The URL leaves /register and lands on the catalog page at /"
+     ],
+     "testData": {
+      "runTag": "qavfw0"
+     },
+     "tags": [
+      "workflow",
+      "critical"
+     ],
+     "source": {
+      "scenarioId": "S-036",
+      "journey": "Create an account",
+      "origin": "browser-agent",
+      "requirements": [
+       "1.10.a"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": "After registering and opening Account, the Main navigation shows only Products, Cart, Orders, Account and Sign out, with no user name, which the expected requirement 1.10.a says should appear. The reported Sign in count mismatch (expected 0, received 1) suggests a Sign in link is also still present, so the app is at fault rather than the test."
+   },
+   "requirements": {
+    "1.10": "A new account is signed in straight away and has no default delivery address yet."
+   }
+  },
+  {
+   "trial": "shop-1",
+   "testKey": "WEB-026",
+   "label": "fp",
+   "finding": {
+    "id": "512ee469-faf1-41fd-b77e-de8cbd7f72bb",
+    "fingerprint": "302df0db9a5520737b6010a48e775165d9d39149554b4ca9ee710cca3b0933f1",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 9
+     },
+     "expected": {
+      "text": "The account page at /account shows the default delivery address field empty (requirement 1.10.b) The name entered at registration is shown on the account page (- main:\n  - heading \"Your account\" [level=1]\n  - paragraph: /Signed in as [\\w.,:/-]+@example\\.com/\n  - text: Name\n  - textbox \"Name\": Test User {{unique}}\n  - text: Default delivery address\n  - textbox \"Default delivery address\"\n  - button \"Save\")",
+      "source": "expected:1"
+     },
+     "observed": "Error: 9. Delivery address textbox has no value (shows as bare textbox)",
+     "evidence": {
+      "screenshots": [],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "not_run",
+     "confidence": "medium",
+     "fingerprint": "302df0db9a5520737b6010a48e775165d9d39149554b4ca9ee710cca3b0933f1",
+     "modelVersion": null,
+     "replays": []
+    },
+    "firstSeenAt": "2026-11-25T20:56:26.178Z",
+    "testId": "296a3c84-2106-4dfb-a3af-b0146ad0cf9d",
+    "confidence": "medium",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "ariaSnapshot",
+     "value": "- main:\n  - heading \"Your account\" [level=1]\n  - paragraph: /Signed in as [\\w.,:/-]+@example\\.com/\n  - text: Name\n  - textbox \"Name\": Test User {{unique}}\n  - text: Default delivery address\n  - textbox \"Default delivery address\"\n  - button \"Save\"",
+     "error": "Error: 9. Delivery address textbox has no value (shows as bare textbox)\n\nexpect(locator).toMatchAriaSnapshot(expected) failed\n\nLocator: getByRole('main')\nTimeout: 8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "ariaSnapshot",
+     "value": "- main:\n  - heading \"Your account\" [level=1]\n  - paragraph: /Signed in as [\\w.,:/-]+@example\\.com/\n  - text: Name\n  - textbox \"Name\": Test User {{unique}}\n  - text: Default delivery address\n  - textbox \"Default delivery address\"\n  - button \"Save\"",
+     "error": "Error: 9. Delivery address textbox has no value (shows as bare textbox)\n\nexpect(locator).toMatchAriaSnapshot(expected) failed\n\nLocator: getByRole('main')\nTimeout: 8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "ariaSnapshot",
+     "value": "- main:\n  - heading \"Your account\" [level=1]\n  - paragraph: /Signed in as [\\w.,:/-]+@example\\.com/\n  - text: Name\n  - textbox \"Name\": Test User {{unique}}\n  - text: Default delivery address\n  - textbox \"Default delivery address\"\n  - button \"Save\"",
+     "error": "Error: 9. Delivery address textbox has no value (shows as bare textbox)\n\nexpect(locator).toMatchAriaSnapshot(expected) failed\n\nLocator: getByRole('main')\nTimeout: 8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "296a3c84-2106-4dfb-a3af-b0146ad0cf9d",
+    "title": "New account has no default delivery address",
+    "spec": {
+     "testId": "WEB-026",
+     "title": "New account has no default delivery address",
+     "description": "Register a new account, then open the account page and verify the delivery address is empty.",
+     "kind": "web",
+     "category": "Account",
+     "type": "functional",
+     "priority": "high",
+     "preconditions": [],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/register",
+       "description": "Open /register"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "Test User {{unique}}",
+       "description": "Enter name for new account"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "user{{unique}}@example.com",
+       "description": "Enter unique email"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "Passw0rd-{{unique}}",
+       "description": "Enter password of 8+ characters"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Submit registration"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Account",
+        "exact": true
+       },
+       "description": "Open account page"
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Save",
+        "exact": true
+       },
+       "description": "Wait until button \"Save\" is visible"
+      },
+      {
+       "action": "assert",
+       "check": "value",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "expected": "Test User {{unique}}",
+       "source": "expected:2",
+       "description": "Name from registration is shown"
+      },
+      {
+       "action": "assert",
+       "check": "ariaSnapshot",
+       "locator": {
+        "by": "role",
+        "role": "main"
+       },
+       "expected": "- main:\n  - heading \"Your account\" [level=1]\n  - paragraph: /Signed in as [\\w.,:/-]+@example\\.com/\n  - text: Name\n  - textbox \"Name\": Test User {{unique}}\n  - text: Default delivery address\n  - textbox \"Default delivery address\"\n  - button \"Save\"",
+       "source": "expected:1",
+       "description": "Delivery address textbox has no value (shows as bare textbox)"
+      }
+     ],
+     "expectedResults": [
+      "The account page at /account shows the default delivery address field empty (requirement 1.10.b)",
+      "The name entered at registration is shown on the account page"
+     ],
+     "testData": {},
+     "tags": [
+      "functional",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-037",
+      "journey": "Set default delivery address",
+      "origin": "browser-agent",
+      "requirements": [
+       "1.10.b"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": "The ariaSnapshot expectation in step 9 contains the literal placeholder {{unique}} instead of the generated value, so it cannot match the rendered name 'Test User 17956367358500'. The page itself appears to render the account correctly with an empty delivery address textbox, so the test's expected snapshot needs the unique value substituted (or a regex used) for step 9 to pass. (proposed fix rejected: sourced check expected:1 was loosened (expected \"- main:\\n  - heading \\\"Your account\\\" [level=1]\\n  - paragraph: /Signed in as [\\\\w.,:/-]+@example\\\\.com/\\n  - text: Name\\n  - textbox \\\"Name\\\": Test User {{unique}}\\n  - text: Default delivery address\\n  - textbox \\\"Default delivery address\\\"\\n  - button \\\"Save\\\"\" \u2192 \"- textbox \\\"Default delivery address\\\"\"))"
+   },
+   "requirements": {
+    "1.10": "A new account is signed in straight away and has no default delivery address yet."
+   }
+  },
+  {
+   "trial": "rbac-3",
+   "testKey": "WEB-049",
+   "label": "fp",
+   "finding": {
+    "id": "8a6b9f9e-f8df-4753-93dc-2cbb55f3f4d3",
+    "fingerprint": "14e893b8fe1929b04bb14cceb77737ca5b76df3316650c2510738a70cc7fcc01",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 5
+     },
+     "expected": {
+      "text": "The page shows the message Not allowed in place of a list of people (requirement 5.2)",
+      "source": "expected:1"
+     },
+     "observed": "Signed in as the regular user (role user) and opened /people. The page did not show \"Not allowed\" as expected (requirement 5.2). Instead it showed the heading \"Page not found\" and HTTP 404 was returned for GET /people. Expected result 1 fails. Expected result 2 holds: no email addresses or names of other accounts appear in the main content.",
+     "evidence": {
+      "screenshots": [
+       "13473018-f14c-4368-a051-c45e78bd0dcb",
+       "ae7c7f13-898e-4ec8-96c1-629c2a926c52"
+      ],
+      "requests": [
+       "GET /people answered HTTP 404"
+      ],
+      "console": [
+       "Console error: Failed to load resource: the server responded with a status of 404 (Not Found)"
+      ]
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "14e893b8fe1929b04bb14cceb77737ca5b76df3316650c2510738a70cc7fcc01",
+     "modelVersion": "db77a7c9-049e-4068-a702-b780811e5853",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 5,
+       "summary": "Replay 1 in a fresh browser as a newly registered account: stopped at step 5 (Expected result 1: the People page shows Not allowed), the check of expected:1: expect(locator).toBeVisible() failed"
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 5,
+       "summary": "Replay 2 in a fresh browser as a newly registered account: stopped at step 5 (Expected result 1: the People page shows Not allowed), the check of expected:1: expect(locator).toBeVisible() failed"
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T02:05:34.769Z",
+    "testId": "fedab706-1422-475a-94d2-1932ff2a41f2",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 5,
+     "check": "visible",
+     "target": "Not allowed",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Not allowed')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/login",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/people",
+       "status": 404,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 5,
+     "check": "visible",
+     "target": "Not allowed",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Not allowed')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/login",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/people",
+       "status": 404,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 5,
+     "check": "visible",
+     "target": "Not allowed",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Not allowed')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/login",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/people",
+       "status": 404,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "fedab706-1422-475a-94d2-1932ff2a41f2",
+    "title": "Regular user opening the People page sees Not allowed",
+    "spec": {
+     "testId": "WEB-049",
+     "title": "Regular user opening the People page sees Not allowed",
+     "description": "Sign in as a regular user and open the People page directly by URL. The page must refuse access and must not list any other accounts.",
+     "kind": "web",
+     "category": "Security",
+     "type": "security",
+     "priority": "critical",
+     "preconditions": [
+      "Signed in as the ana test account, role user"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/people",
+       "description": "Open /people"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "{{credentials.username}}",
+       "description": "Enter the regular user's email"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.password}}",
+       "description": "Enter the password"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Sign in as the regular user"
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "text",
+        "value": "Not allowed"
+       },
+       "source": "expected:1",
+       "description": "Expected result 1: the People page shows Not allowed"
+      }
+     ],
+     "expectedResults": [
+      "The page shows the message Not allowed in place of a list of people (requirement 5.2)",
+      "No names or email addresses of other accounts are shown on the page"
+     ],
+     "testData": {},
+     "tags": [
+      "security",
+      "critical"
+     ],
+     "source": {
+      "scenarioId": "S-045",
+      "journey": "Regular user tries to open People",
+      "origin": "browser-agent",
+      "requirements": [
+       "5.2"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": "After signing in as the regular user, navigating to /people shows a 'Page not found' heading instead of the required 'Not allowed' message, so the application does not meet requirement 5.2. The test steps appear correct."
+   },
+   "requirements": {
+    "5.2": "Only admins can open the People page; anyone else sees \"Not allowed\" (403)."
+   }
+  },
+  {
+   "trial": "shop-3",
+   "testKey": "WEB-053",
+   "label": "fp",
+   "finding": {
+    "id": "6bf612d7-ca55-4f95-b9ee-1aea3f2f9c83",
+    "fingerprint": "86584037ebbf561eb71ad393f51f47a619b3522222b5dc2103c33b63e0b740aa",
+    "finding": {
+     "objective": {
+      "id": "OBJ-294a6e984459222c",
+      "kind": "rule",
+      "source": "R-12c484d78f10",
+      "operator": "as_stated"
+     },
+     "actions": {
+      "stepCount": 17
+     },
+     "expected": {
+      "text": "Total equals subtotal minus discount plus shipping charge.",
+      "source": "R-12c484d78f10"
+     },
+     "observed": "Signed in as a new account, added Trail Mug (1) and Desk Lamp (2). Cart before discount: Subtotal $47.00, Discount $0.00, Shipping $5.00, Total $52.00 (consistent with rule R-12c484d78f10). After applying discount code SAVE10 the cart shows Subtotal $47.00, Discount (SAVE10) \u2212$1.25, Shipping $5.00, Total $52.00 (also after reload). Per the rule, Total should be 47.00 \u2212 discount + 5.00; with a 10% discount the expected discount is $4.70 and total $47.30. The displayed total ($52.00) does not equal subtotal minus discount plus shipping ($50.75 with the displayed discount), so the rule is violated.",
+     "evidence": {
+      "screenshots": [
+       "d81258d6-4e63-4e24-b373-b0a38efe0e3b",
+       "ecd84e34-4842-4a24-af22-cdbed5335ab4"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "86584037ebbf561eb71ad393f51f47a619b3522222b5dc2103c33b63e0b740aa",
+     "modelVersion": "5b3ce641-216f-4ef4-9a4a-849645961215",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 17,
+       "summary": "Replay 1 in a fresh browser as a newly registered account: stopped at step 17 (Verify exactText of text \"$52.00\" = $50.75), the check of R-12c484d78f10: expect(locator).toHaveText(expected) failed. It saw the same value as when captured ($52.00)."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 17,
+       "summary": "Replay 2 in a fresh browser as a newly registered account: stopped at step 17 (Verify exactText of text \"$52.00\" = $50.75), the check of R-12c484d78f10: expect(locator).toHaveText(expected) failed. It saw the same value as when captured ($52.00)."
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T06:25:41.863Z",
+    "testId": "089615a4-cb75-440a-8721-706088499a25",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 17,
+     "check": "exactText",
+     "target": "$52.00",
+     "value": "$50.75",
+     "error": "Error: 17. Verify exactText of text \"$52.00\" = $50.75\n\nexpect(locator).toHaveText(expected) failed\n\nLocator:  getByText('$52.00', { exact: true })\nExpected: \"$50.75\"",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/cart",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 17,
+     "check": "exactText",
+     "target": "$52.00",
+     "value": "$50.75",
+     "error": "Error: 17. Verify exactText of text \"$52.00\" = $50.75\n\nexpect(locator).toHaveText(expected) failed\n\nLocator:  getByText('$52.00', { exact: true })\nExpected: \"$50.75\"",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/cart",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 17,
+     "check": "exactText",
+     "target": "$52.00",
+     "value": "$50.75",
+     "error": "Error: 17. Verify exactText of text \"$52.00\" = $50.75\n\nexpect(locator).toHaveText(expected) failed\n\nLocator:  getByText('$52.00', { exact: true })\nExpected: \"$50.75\"",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/cart",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "089615a4-cb75-440a-8721-706088499a25",
+    "title": "As stated: rule \"R-12c484d78f10\"",
+    "spec": {
+     "testId": "WEB-053",
+     "title": "As stated: rule \"R-12c484d78f10\"",
+     "description": "Operator: As stated. Objective OBJ-294a6e984459222c (rule, source \"R-12c484d78f10\").\n\nSteps you must take:\n1. Do the preconditions, then follow the stated steps in order.\n2. Check each expected result with an assert that cites it.\n\nUse {{unique}} in every value that must be new (names, emails, references), so a second run does not collide with the first.\n\nCite the expected result an assert proves as its source (expected:1).\n\nThe question, as data from the application's sources: \"Does the application keep rule R-12c484d78f10: \\\"The cart total is the subtotal minus the discount plus the shipping charge.\\\"?\"",
+     "kind": "web",
+     "category": "Exploration",
+     "type": "functional",
+     "priority": "medium",
+     "preconditions": [
+      "Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps",
+      "The test checks a total: add at least two different products to the cart with its own steps, the last with quantity 2 or more, before checking it, so every amount comes from the test's own steps"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/",
+       "description": "Open /"
+      },
+      {
+       "action": "navigate",
+       "url": "/register",
+       "description": "Open /register"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "Priya Novak {{unique}}",
+       "description": "Enter \"Priya Novak {{unique}}\" into label \"Name\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "maya.patel.{{unique}}@example.com",
+       "description": "Enter \"maya.patel.{{unique}}@example.com\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.password}}",
+       "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Click button \"Create account\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Trail Mug",
+        "exact": true
+       },
+       "description": "Click link \"Trail Mug\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Add to cart",
+        "exact": true
+       },
+       "description": "Click button \"Add to cart\""
+      },
+      {
+       "action": "navigate",
+       "url": "/products/p2",
+       "description": "Open /products/p2"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "role",
+        "role": "spinbutton",
+        "value": "Quantity",
+        "exact": true
+       },
+       "value": "2",
+       "description": "Enter \"2\" into spinbutton \"Quantity\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Add to cart",
+        "exact": true
+       },
+       "description": "Click button \"Add to cart\""
+      },
+      {
+       "action": "navigate",
+       "url": "/cart",
+       "description": "Open /cart"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "role",
+        "role": "textbox",
+        "value": "Discount code",
+        "exact": true
+       },
+       "value": "SAVE10",
+       "description": "Enter \"SAVE10\" into textbox \"Discount code\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Apply",
+        "exact": true
+       },
+       "description": "Click button \"Apply\""
+      },
+      {
+       "action": "navigate",
+       "url": "/cart",
+       "description": "Open /cart"
+      },
+      {
+       "action": "assert",
+       "check": "exactText",
+       "locator": {
+        "by": "text",
+        "value": "Total",
+        "exact": true
+       },
+       "expected": "Total",
+       "source": "expected:1",
+       "description": "Verify exactText of text \"Total\" = Total"
+      },
+      {
+       "action": "assert",
+       "check": "exactText",
+       "locator": {
+        "by": "text",
+        "value": "$52.00",
+        "exact": true
+       },
+       "expected": "$50.75",
+       "source": "R-12c484d78f10",
+       "description": "Verify exactText of text \"$52.00\" = $50.75"
+      }
+     ],
+     "expectedResults": [
+      "\"Total equals subtotal minus discount plus shipping charge.\" (source: R-12c484d78f10)"
+     ],
+     "testData": {
+      "runTag": "qapd5n"
+     },
+     "tags": [
+      "functional",
+      "medium"
+     ],
+     "source": {
+      "scenarioId": "OBJ-294a6e984459222c-as_stated",
+      "origin": "browser-agent"
+     }
+    },
+    "meta": {
+     "layer": "page",
+     "apiAmount": "holds"
+    },
+    "validationReason": "The page computes the total correctly per the rule: subtotal $81.50 minus 10% discount $8.15 plus free shipping gives $73.35, which is shown as Total. The test expected $50.75 and searched for $52.00, which appear nowhere on the page, so the expectation is wrong. (proposed fix rejected: sourced check R-12c484d78f10 was removed)"
+   },
+   "requirements": {}
+  },
+  {
+   "trial": "rbac-4",
+   "testKey": "WEB-029",
+   "label": "fp",
+   "finding": {
+    "id": "2da40eed-c404-4e3e-b794-8319806a6abb",
+    "fingerprint": "2cc643a46840a386921c69fa53c3609d0850d68ae25f1a43dbcbdbea99ee229a",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 9
+     },
+     "expected": {
+      "text": "The account is created and the navigation shows Sign out and the new name (requirement 2.7)",
+      "source": "expected:1"
+     },
+     "observed": "Submitting the Create account form with an 8-character password (qaxfbr-x) and a unique name and email created the account and redirected to /notes, which shows \"No notes yet.\" and a Sign out button (expected 2 passes). However, the main navigation shows only Notes, New note, Account and Sign out. The new account name \"QA <unique>\" does not appear in the navigation, so expected result 1 (navigation shows Sign out and the new name) fails.",
+     "evidence": {
+      "screenshots": [
+       "ac8c90a9-6137-4985-a5b6-8e1a39891791",
+       "87977759-5762-4cf5-a396-a1c568a25971"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "2cc643a46840a386921c69fa53c3609d0850d68ae25f1a43dbcbdbea99ee229a",
+     "modelVersion": "b96600ee-f217-407f-8d94-a093c41f5c6b",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 9,
+       "summary": "Replay 1 in a fresh browser: stopped at step 9 (Verify text of navigation \"Main\" = QA {{unique}}), the check of expected:1: expect(locator).toContainText(expected) failed. It saw the same value as when captured (Notes New note Account Sign out)."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 9,
+       "summary": "Replay 2 in a fresh browser: stopped at step 9 (Verify text of navigation \"Main\" = QA {{unique}}), the check of expected:1: expect(locator).toContainText(expected) failed. It saw the same value as when captured (Notes New note Account Sign out)."
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T03:47:27.276Z",
+    "testId": "f42bee94-d1d7-4bd2-b0fd-e4986aa6343f",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "text",
+     "target": "Main",
+     "value": "QA {{unique}}",
+     "error": "Error: 9. Verify text of navigation \"Main\" = QA {{unique}}\n\nexpect(locator).toContainText(expected) failed\n\nLocator: getByRole('navigation', { name: 'Main' })\nExpected substring: \"QA 17956723567340\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "text",
+     "target": "Main",
+     "value": "QA {{unique}}",
+     "error": "Error: 9. Verify text of navigation \"Main\" = QA {{unique}}\n\nexpect(locator).toContainText(expected) failed\n\nLocator: getByRole('navigation', { name: 'Main' })\nExpected substring: \"QA 17956723683490\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 9,
+     "check": "text",
+     "target": "Main",
+     "value": "QA {{unique}}",
+     "error": "Error: 9. Verify text of navigation \"Main\" = QA {{unique}}\n\nexpect(locator).toContainText(expected) failed\n\nLocator: getByRole('navigation', { name: 'Main' })\nExpected substring: \"QA 17956723799660\"",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "f42bee94-d1d7-4bd2-b0fd-e4986aa6343f",
+    "title": "Registration accepts a password of exactly 8 characters",
+    "spec": {
+     "testId": "WEB-029",
+     "title": "Registration accepts a password of exactly 8 characters",
+     "description": "Submit the Create account form with an 8-character password, which is the minimum length.",
+     "kind": "web",
+     "category": "Registration",
+     "type": "boundary",
+     "priority": "medium",
+     "preconditions": [
+      "Visitor is signed out"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/register",
+       "description": "Open /register"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "QA {{unique}}",
+       "description": "Enter throwaway account name"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "qa+{{unique}}@example.com",
+       "description": "Enter throwaway email"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "Qa{{unique}}",
+       "description": "Enter 8-character password"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "qaxfbr-x",
+       "description": "Enter exactly 8-character password"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Submit the Create account form"
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "text",
+        "value": "No notes yet."
+       },
+       "description": "Wait until text \"No notes yet.\" is visible"
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign out",
+        "exact": true
+       },
+       "source": "expected:1",
+       "description": "Verify visible of button \"Sign out\""
+      },
+      {
+       "action": "assert",
+       "check": "text",
+       "locator": {
+        "by": "role",
+        "role": "navigation",
+        "value": "Main"
+       },
+       "expected": "QA {{unique}}",
+       "source": "expected:1",
+       "description": "Verify text of navigation \"Main\" = QA {{unique}}"
+      }
+     ],
+     "expectedResults": [
+      "The account is created and the navigation shows Sign out and the new name (requirement 2.7)",
+      "The Notes page is reached and shows 'No notes yet.'"
+     ],
+     "testData": {
+      "runTag": "qaxfbr"
+     },
+     "tags": [
+      "boundary",
+      "medium"
+     ],
+     "source": {
+      "scenarioId": "S-028",
+      "journey": "Register a new account",
+      "origin": "browser-agent",
+      "requirements": [
+       "2.7"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": "The test reached the Notes page and shows Sign out, but the Main navigation contains only Notes, New note, Account and Sign out, with no account name. Expected result 2.7 requires the new name to appear in navigation, so the application is missing it, not the test."
+   },
+   "requirements": {
+    "2.7": "A password needs at least 8 characters; a shorter one is refused with a message that states the minimum (API: 400)."
+   }
+  },
+  {
+   "trial": "rbac-4",
+   "testKey": "WEB-035",
+   "label": "BR-09",
+   "finding": {
+    "id": "9359d5dc-e50d-4142-bc77-166cd608b32d",
+    "fingerprint": "ef4d4a9203a9b007d81c913251bb3821141fd266f6cc0e291a24ac3f915518c2",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 22
+     },
+     "expected": {
+      "text": "The next sign-in with the correct password shows 'Too many failed sign-ins. Try again in a minute.' and the page stays on /login (requirement 2.14)",
+      "source": "expected:2"
+     },
+     "observed": "Registered a fresh account, signed out, and made five sign-ins with a wrong password. Each of the five showed 'Email or password is wrong.' (expected result 1 passed). The sixth attempt with the correct password signed in successfully and navigated to /notes instead of being refused with 'Too many failed sign-ins. Try again in a minute.' and staying on /login. Expected result 2 failed: the rate limit after 5 failed sign-ins for the same email (rule R-bea5d1524f73, 429) did not apply.",
+     "evidence": {
+      "screenshots": [
+       "250353a8-00c1-4af4-848c-a8c0c8d2f4fd",
+       "6e9b0f4b-366a-4e1a-8370-0c1d89226a0e"
+      ],
+      "requests": [
+       "POST /login answered HTTP 400"
+      ],
+      "console": [
+       "Console error: Failed to load resource: the server responded with a status of 400 (Bad Request)"
+      ]
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "ef4d4a9203a9b007d81c913251bb3821141fd266f6cc0e291a24ac3f915518c2",
+     "modelVersion": "b96600ee-f217-407f-8d94-a093c41f5c6b",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 22,
+       "summary": "Replay 1 in a fresh browser: stopped at step 22 (Verify url = /login), the check of expected:2: expect(page).toHaveURL(expected) failed. It saw the same value as when captured (http://127.0.0.1:7150/notes)."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 22,
+       "summary": "Replay 2 in a fresh browser: stopped at step 22 (Verify url = /login), the check of expected:2: expect(page).toHaveURL(expected) failed. It saw the same value as when captured (http://127.0.0.1:7150/notes)."
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T03:49:36.324Z",
+    "testId": "0a16814c-9f41-4ca1-b21c-cc45f3061bfb",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 22,
+     "check": "url",
+     "value": "/login",
+     "error": "Error: expect(page).toHaveURL(expected) failed\n\nExpected pattern: /\\/login/i\nReceived string:  \"http://127.0.0.1:7150/notes\"\nTimeout: 8000ms\n",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/login",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 22,
+     "check": "url",
+     "value": "/login",
+     "error": "Error: expect(page).toHaveURL(expected) failed\n\nExpected pattern: /\\/login/i\nReceived string:  \"http://127.0.0.1:7150/notes\"\nTimeout: 8000ms\n",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/login",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 22,
+     "check": "url",
+     "value": "/login",
+     "error": "Error: expect(page).toHaveURL(expected) failed\n\nExpected pattern: /\\/login/i\nReceived string:  \"http://127.0.0.1:7150/notes\"\nTimeout: 8000ms\n",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/login",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "0a16814c-9f41-4ca1-b21c-cc45f3061bfb",
+    "title": "Sign-in is locked after 5 failed attempts for one email",
+    "spec": {
+     "testId": "WEB-035",
+     "title": "Sign-in is locked after 5 failed attempts for one email",
+     "description": "Register a fresh account, sign out, then submit five sign-ins with a wrong password for that email. Then submit the correct password.",
+     "kind": "web",
+     "category": "Security",
+     "type": "security",
+     "priority": "high",
+     "preconditions": [
+      "Visitor is signed out"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/register",
+       "description": "Open /register"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "QA Lock {{unique}}",
+       "description": "Enter \"QA Lock {{unique}}\" into label \"Name\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "qa+{{unique}}@example.com",
+       "description": "Enter \"qa+{{unique}}@example.com\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "CorrectPass-{{unique}}",
+       "description": "Enter \"CorrectPass-{{unique}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Click button \"Create account\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign out",
+        "exact": true
+       },
+       "description": "Click button \"Sign out\""
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Wait until link \"Create account\" is visible"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "qa+{{unique}}@example.com",
+       "description": "Enter \"qa+{{unique}}@example.com\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "WrongPass-1-{{unique}}",
+       "description": "Enter \"WrongPass-1-{{unique}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "WrongPass-2-{{unique}}",
+       "description": "Enter \"WrongPass-2-{{unique}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "WrongPass-3-{{unique}}",
+       "description": "Enter \"WrongPass-3-{{unique}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "WrongPass-4-{{unique}}",
+       "description": "Enter \"WrongPass-4-{{unique}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "WrongPass-5-{{unique}}",
+       "description": "Enter \"WrongPass-5-{{unique}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "role",
+        "role": "alert"
+       },
+       "expected": "Email or password is wrong.",
+       "source": "expected:1",
+       "description": "Verify visible of alert \"\" = Email or password is wrong."
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "CorrectPass-{{unique}}",
+       "description": "Enter \"CorrectPass-{{unique}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "assert",
+       "check": "url",
+       "expected": "/login",
+       "source": "expected:2",
+       "description": "Verify url = /login"
+      }
+     ],
+     "expectedResults": [
+      "The fifth wrong attempt shows 'Email or password is wrong.' (requirement 2.11)",
+      "The next sign-in with the correct password shows 'Too many failed sign-ins. Try again in a minute.' and the page stays on /login (requirement 2.14)"
+     ],
+     "testData": {},
+     "tags": [
+      "security",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-033",
+      "journey": "Log in and log out",
+      "origin": "browser-agent",
+      "requirements": [
+       "2.11",
+       "2.14"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": null
+   },
+   "requirements": {
+    "2.11": "A person signs in with their email address and password; a wrong combination is refused with \"Email or password is wrong.\" (API: 401).",
+    "2.14": "After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed\u2026 After 5 failed sign-ins for the same email address within one minute, every sign-in for that email address is refused for one minute with \"Too many failed sign-ins. Try again in a minute.\" (API: 429), even with the right password."
+   }
+  },
+  {
+   "trial": "rbac-3",
+   "testKey": "WEB-059",
+   "label": "BR-07",
+   "finding": {
+    "id": "6ea987a3-b94d-4910-a5e6-a389e133077a",
+    "fingerprint": "e84b57c4dcd43cee91acdb74a0a5098de10f3403bf573eba99a6cdd142057ef9",
+    "finding": {
+     "objective": {
+      "id": "OBJ-21f286fb78884da5",
+      "kind": "rule",
+      "source": "R-6722c50a0ffc",
+      "operator": "as_stated"
+     },
+     "actions": {
+      "stepCount": 7
+     },
+     "expected": {
+      "text": "\"A shorter password is refused with a message stating the minimum (API: 400).\" (source: R-6722c50a0ffc)",
+      "source": "expected:1"
+     },
+     "observed": "Rule R-6722c50a0ffc says a password needs at least 8 characters and a shorter one must be refused with a message stating the minimum. I registered a new account (name and email with unique suffix) using a 7-character password (\"short7!\"). The application did not refuse it: no minimum-length message appeared, the account was created, and the browser went to /notes (\"No notes yet.\"). Expected: refusal with a message stating the 8-character minimum, staying on /register. Observed: accepted.",
+     "evidence": {
+      "screenshots": [
+       "a88e750e-78c2-4cf8-a7aa-5c6d40b4a6ce",
+       "05bc03cf-431b-4682-b26a-0aeb95f22252"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "e84b57c4dcd43cee91acdb74a0a5098de10f3403bf573eba99a6cdd142057ef9",
+     "modelVersion": "db77a7c9-049e-4068-a702-b780811e5853",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 7,
+       "summary": "Replay 1 in a fresh browser: stopped at step 7 (A 7-character password should be refused and the user should stay on the registration page with the minimum stated), the check of expected:1: expect(page).toHaveURL(expected) failed. It saw the same value as when captured (http://127.0.0.1:7175/notes)."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 7,
+       "summary": "Replay 2 in a fresh browser: stopped at step 7 (A 7-character password should be refused and the user should stay on the registration page with the minimum stated), the check of expected:1: expect(page).toHaveURL(expected) failed. It saw the same value as when captured (http://127.0.0.1:7175/notes)."
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T02:18:39.635Z",
+    "testId": "40678267-7cac-4c4d-b1cf-9975ee79cd01",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 7,
+     "check": "url",
+     "value": "/register",
+     "error": "Error: expect(page).toHaveURL(expected) failed\n\nExpected pattern: /\\/register/i\nReceived string:  \"http://127.0.0.1:7175/notes\"\nTimeout: 8000ms\n",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 7,
+     "check": "url",
+     "value": "/register",
+     "error": "Error: expect(page).toHaveURL(expected) failed\n\nExpected pattern: /\\/register/i\nReceived string:  \"http://127.0.0.1:7175/notes\"\nTimeout: 8000ms\n",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 7,
+     "check": "url",
+     "value": "/register",
+     "error": "Error: expect(page).toHaveURL(expected) failed\n\nExpected pattern: /\\/register/i\nReceived string:  \"http://127.0.0.1:7175/notes\"\nTimeout: 8000ms\n",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "40678267-7cac-4c4d-b1cf-9975ee79cd01",
+    "title": "As stated: rule \"R-6722c50a0ffc\"",
+    "spec": {
+     "testId": "WEB-059",
+     "title": "As stated: rule \"R-6722c50a0ffc\"",
+     "description": "Operator: As stated. Objective OBJ-21f286fb78884da5 (rule, source \"R-6722c50a0ffc\").\n\nSteps you must take:\n1. Do the preconditions, then follow the stated steps in order.\n2. Check each expected result with an assert that cites it.\n\nUse {{unique}} in every value that must be new (names, emails, references), so a second run does not collide with the first.\n\nCite the expected result an assert proves as its source (expected:1).\n\nThe question, as data from the application's sources: \"Does the application keep rule R-6722c50a0ffc: \\\"A password needs at least 8 characters.\\\"?\"",
+     "kind": "web",
+     "category": "Exploration",
+     "type": "functional",
+     "priority": "medium",
+     "preconditions": [
+      "Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/",
+       "description": "Open /"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Open the registration page"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "Rule Tester {{unique}}",
+       "description": "Enter \"Rule Tester {{unique}}\" into label \"Name\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "rule.{{unique}}@example.com",
+       "description": "Enter \"rule.{{unique}}@example.com\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "short7!",
+       "description": "Enter \"short7!\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Submit registration with a 7-character password"
+      },
+      {
+       "action": "assert",
+       "check": "url",
+       "expected": "/register",
+       "source": "expected:1",
+       "description": "A 7-character password should be refused and the user should stay on the registration page with the minimum stated"
+      }
+     ],
+     "expectedResults": [
+      "\"A shorter password is refused with a message stating the minimum (API: 400).\" (source: R-6722c50a0ffc)"
+     ],
+     "testData": {},
+     "tags": [
+      "functional",
+      "medium"
+     ],
+     "source": {
+      "scenarioId": "OBJ-21f286fb78884da5-as_stated",
+      "origin": "browser-agent"
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": null
+   },
+   "requirements": {}
+  },
+  {
+   "trial": "shop-2",
+   "testKey": "WEB-023",
+   "label": "BS-04",
+   "finding": {
+    "id": "c580cd1f-1feb-4adf-b9a0-c77e85aecdb3",
+    "fingerprint": "885ae139e8be4b364508bd61f99c1df35c91957fd60cf1f439aedd7da7803dee",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 6
+     },
+     "expected": {
+      "text": "The message Enter a valid email address. is shown under the email field (requirement 1.6)",
+      "source": "expected:1"
+     },
+     "observed": "Submitting the registration form with Name \"qaqxml tester <unique>\", Email \"not-an-email\" and Password \"Passw0rd1\" was not refused. No \"Enter a valid email address.\" message appeared. Instead the app accepted the submission, redirected to the Products page (/), and showed the signed-in navigation (Orders, Account, Sign out). Expected result 1 fails (requirement 1.6); expected result 2 is not met because the page left the create account form.",
+     "evidence": {
+      "screenshots": [
+       "cf23138b-e859-47ff-90b9-bf067a354bd7",
+       "642ef93d-cfad-4981-bed4-064d62e82549"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "885ae139e8be4b364508bd61f99c1df35c91957fd60cf1f439aedd7da7803dee",
+     "modelVersion": "baeac230-eb3f-42e2-a848-d64a597b5efc",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 6,
+       "summary": "Replay 1 in a fresh browser: stopped at step 6 (Expected: the email validation message is shown under the email field), the check of expected:1: expect(locator).toBeVisible() failed"
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 6,
+       "summary": "Replay 2 in a fresh browser: stopped at step 6 (Expected: the email validation message is shown under the email field), the check of expected:1: expect(locator).toBeVisible() failed"
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-25T20:09:39.309Z",
+    "testId": "8ba3b376-7779-40f1-b836-64aee3351359",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Enter a valid email address.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Enter a valid email address.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 6,
+     "check": "visible",
+     "target": "Enter a valid email address.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Enter a valid email address.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/register",
+       "status": 303,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "8ba3b376-7779-40f1-b836-64aee3351359",
+    "title": "Registration refuses an invalid email address",
+    "spec": {
+     "testId": "WEB-023",
+     "title": "Registration refuses an invalid email address",
+     "description": "Submitting an email without a valid format must be refused with the email message.",
+     "kind": "web",
+     "category": "Authentication",
+     "type": "validation",
+     "priority": "high",
+     "preconditions": [
+      "Browser session has no signed-in user"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/register",
+       "description": "Open /register"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "qaqxml tester {{unique}}",
+       "description": "Enter the name"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "not-an-email",
+       "description": "Enter the invalid email"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "Passw0rd1",
+       "description": "Enter the password"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Submit the form"
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "text",
+        "value": "Enter a valid email address."
+       },
+       "source": "expected:1",
+       "description": "Expected: the email validation message is shown under the email field"
+      }
+     ],
+     "expectedResults": [
+      "The message Enter a valid email address. is shown under the email field (requirement 1.6)",
+      "The page remains on the create account form"
+     ],
+     "testData": {},
+     "tags": [
+      "validation",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-034",
+      "origin": "browser-agent",
+      "requirements": [
+       "1.6"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": null
+   },
+   "requirements": {
+    "1.6": "The email address must be a valid email address; anything else is refused with \"Enter a valid email address.\""
+   }
+  },
+  {
+   "trial": "shop-2",
+   "testKey": "WEB-032",
+   "label": "BS-06",
+   "finding": {
+    "id": "91d2c0bb-8ddf-472a-a140-1a97e08872be",
+    "fingerprint": "03541f9da7465e8cadb5d64fa3866b021764e46ac32c90972631305b8c6be07c",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 11
+     },
+     "expected": {
+      "text": "After Save and a page reload the Name field shows the saved name and the default delivery address shows the saved address (requirement 7.2.a)",
+      "source": "expected:1"
+     },
+     "observed": "Expected result 1 fails. I signed in with the provided test account, set Name to \"Grace Moreau qa0jwf\" and Default delivery address to \"[hidden]\", clicked Save, and the page showed \"Saved.\". After reloading /account, the Name field showed the old value \"QA Replay mwwkbj5j689077\" and the Default delivery address field was empty. The saved name and address were not persisted. Expected result 2 (checkout step 1 starts with the saved address) was not reached because the address was not stored.",
+     "evidence": {
+      "screenshots": [
+       "1f6a3447-e12b-45b0-a96d-fae7d254539e",
+       "feb9dffa-c810-4ab4-abca-7d2f76212561"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "03541f9da7465e8cadb5d64fa3866b021764e46ac32c90972631305b8c6be07c",
+     "modelVersion": "baeac230-eb3f-42e2-a848-d64a597b5efc",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 11,
+       "summary": "Replay 1 in a fresh browser as a newly registered account: stopped at step 11 (Verify value of label \"Default delivery address\" = [hidden]), the check of expected:1: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ()."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 11,
+       "summary": "Replay 2 in a fresh browser as a newly registered account: stopped at step 11 (Verify value of label \"Default delivery address\" = [hidden]), the check of expected:1: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured ()."
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-25T20:16:12.225Z",
+    "testId": "712dfa54-36d2-4ee4-bf17-217f2ee5a084",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "value",
+     "target": "Default delivery address",
+     "value": "[hidden]",
+     "error": "Error: expect(locator).toHaveValue(expected) failed\n\nLocator:  getByLabel('Default delivery address')\nExpected: \"[hidden]\"\nReceived: \"\"\nTimeout:  8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "value",
+     "target": "Default delivery address",
+     "value": "[hidden]",
+     "error": "Error: expect(locator).toHaveValue(expected) failed\n\nLocator:  getByLabel('Default delivery address')\nExpected: \"[hidden]\"\nReceived: \"\"\nTimeout:  8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 11,
+     "check": "value",
+     "target": "Default delivery address",
+     "value": "[hidden]",
+     "error": "Error: expect(locator).toHaveValue(expected) failed\n\nLocator:  getByLabel('Default delivery address')\nExpected: \"[hidden]\"\nReceived: \"\"\nTimeout:  8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "712dfa54-36d2-4ee4-bf17-217f2ee5a084",
+    "title": "Delivery address saved on the account page is used at checkout",
+    "spec": {
+     "testId": "WEB-032",
+     "title": "Delivery address saved on the account page is used at checkout",
+     "description": "The customer saves a new name and delivery address and the next checkout starts with that address.",
+     "kind": "web",
+     "category": "Account",
+     "type": "workflow",
+     "priority": "critical",
+     "preconditions": [
+      "Customer is signed in",
+      "Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/account",
+       "description": "Open /account"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "{{credentials.username}}",
+       "description": "Sign in with the provided test account"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.password}}",
+       "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "role",
+        "role": "heading",
+        "value": "Account"
+       },
+       "description": "Wait until heading \"Account\" is visible"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "Grace Moreau qa0jwf",
+       "description": "Set a new name"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Default delivery address"
+       },
+       "value": "726 Oak Lane",
+       "description": "Set a new default delivery address"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Save",
+        "exact": true
+       },
+       "description": "Save the account details"
+      },
+      {
+       "action": "navigate",
+       "url": "/account",
+       "description": "Open /account"
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "label",
+        "value": "Default delivery address"
+       },
+       "description": "Wait until label \"Default delivery address\" is visible"
+      },
+      {
+       "action": "assert",
+       "check": "value",
+       "locator": {
+        "by": "label",
+        "value": "Default delivery address"
+       },
+       "expected": "726 Oak Lane",
+       "source": "expected:1",
+       "description": "Verify value of label \"Default delivery address\" = 726 Oak Lane"
+      }
+     ],
+     "expectedResults": [
+      "After Save and a page reload the Name field shows the saved name and the default delivery address shows the saved address (requirement 7.2.a)",
+      "On the checkout step the delivery address field starts with the saved address (requirement 7.3.b)"
+     ],
+     "testData": {
+      "runTag": "qa0jwf"
+     },
+     "tags": [
+      "workflow",
+      "critical"
+     ],
+     "source": {
+      "scenarioId": "S-016",
+      "journey": "Place an order with delivery address",
+      "origin": "browser-agent",
+      "requirements": [
+       "7.2.a",
+       "7.3.b"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": null
+   },
+   "requirements": {
+    "7.2": "On the Account page the customer can change their name and default delivery address and save them; the name is required.",
+    "7.3": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting\u2026 Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting address of the next checkout."
+   }
+  },
+  {
+   "trial": "shop-3",
+   "testKey": "WEB-016",
+   "label": "BS-06",
+   "finding": {
+    "id": "f152708b-5dd1-4556-9b90-c83e7beb66a1",
+    "fingerprint": "a32a1e4e34e36e5d4aa98946c4a0baf753ca3a598c66a995ba4570f40331ea21",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 14
+     },
+     "expected": {
+      "text": "After reload the Name field still shows the new name (requirement 7.3.b)",
+      "source": "expected:2"
+     },
+     "observed": "Registered a new account, signed in, changed Name on /account to \"Ravi Turing qa4igb\" and clicked Save. The page showed \"Saved.\" and the Name field held the new value (expected 1 passed). After reloading /account the Name field showed the old value \"Ravi Turing 1795672410000\" instead of the saved name, so the saved name did not persist (expected 2 failed; requirement 7.3.b).",
+     "evidence": {
+      "screenshots": [
+       "6aef3d8f-163c-4a25-afdf-e024c1fa1f50",
+       "3d24861d-faba-465c-924b-b86cd87c1d44"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "a32a1e4e34e36e5d4aa98946c4a0baf753ca3a598c66a995ba4570f40331ea21",
+     "modelVersion": "5b3ce641-216f-4ef4-9a4a-849645961215",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 14,
+       "summary": "Replay 1 in a fresh browser: stopped at step 14 (Verify value of label \"Name\" = Ravi Turing qa4igb), the check of expected:2: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured (Ravi Turing {{unique}})."
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 14,
+       "summary": "Replay 2 in a fresh browser: stopped at step 14 (Verify value of label \"Name\" = Ravi Turing qa4igb), the check of expected:2: expect(locator).toHaveValue(expected) failed. It saw the same value as when captured (Ravi Turing {{unique}})."
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T05:54:38.866Z",
+    "testId": "7399b106-19c1-4849-9955-3848aff079f3",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 14,
+     "check": "value",
+     "target": "Name",
+     "value": "Ravi Turing qa4igb",
+     "error": "Error: expect(locator).toHaveValue(expected) failed\n\nLocator:  getByLabel('Name')\nExpected: \"Ravi Turing qa4igb\"\nReceived: \"Ravi Turing 17956829914090\"\nTimeout:  8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 14,
+     "check": "value",
+     "target": "Name",
+     "value": "Ravi Turing qa4igb",
+     "error": "Error: expect(locator).toHaveValue(expected) failed\n\nLocator:  getByLabel('Name')\nExpected: \"Ravi Turing qa4igb\"\nReceived: \"Ravi Turing 17956830038260\"\nTimeout:  8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 14,
+     "check": "value",
+     "target": "Name",
+     "value": "Ravi Turing qa4igb",
+     "error": "Error: expect(locator).toHaveValue(expected) failed\n\nLocator:  getByLabel('Name')\nExpected: \"Ravi Turing qa4igb\"\nReceived: \"Ravi Turing 17956830159670\"\nTimeout:  8000ms",
+     "requests": [
+      {
+       "method": "GET",
+       "path": "/account",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "in a fresh browser"
+    }
+   ],
+   "test": {
+    "id": "7399b106-19c1-4849-9955-3848aff079f3",
+    "title": "Saved name persists after reload for a newly created account",
+    "spec": {
+     "testId": "WEB-016",
+     "title": "Saved name persists after reload for a newly created account",
+     "description": "Register a new account with generated data, sign in, open the Account page, change the Name to a value tagged qa4igb, click Save, then reload the page.",
+     "kind": "web",
+     "category": "Account",
+     "type": "workflow",
+     "priority": "high",
+     "preconditions": [],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/register",
+       "description": "Open /register"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "Ravi Turing {{unique}}",
+       "description": "Enter \"Ravi Turing {{unique}}\" into label \"Name\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "qa+{{unique}}@example.com",
+       "description": "Enter \"qa+{{unique}}@example.com\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "7!qapd5n-Zx6",
+       "description": "Enter \"7!qapd5n-Zx6\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Click button \"Create account\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Account",
+        "exact": true
+       },
+       "description": "Click link \"Account\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "Ravi Turing qa4igb",
+       "description": "Enter \"Ravi Turing qa4igb\" into label \"Name\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Save",
+        "exact": true
+       },
+       "description": "Click button \"Save\""
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "text",
+        "value": "Saved"
+       },
+       "description": "Wait until text \"Saved\" is visible"
+      },
+      {
+       "action": "assert",
+       "check": "value",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "expected": "Ravi Turing qa4igb",
+       "source": "expected:1",
+       "description": "Verify value of label \"Name\" = Ravi Turing qa4igb"
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "text",
+        "value": "Saved"
+       },
+       "source": "R-07d47f2c76b8",
+       "description": "Verify visible of text \"Saved\""
+      },
+      {
+       "action": "navigate",
+       "url": "/account",
+       "description": "Open /account"
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "description": "Wait until label \"Name\" is visible"
+      },
+      {
+       "action": "assert",
+       "check": "value",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "expected": "Ravi Turing qa4igb",
+       "source": "expected:2",
+       "description": "Verify value of label \"Name\" = Ravi Turing qa4igb"
+      }
+     ],
+     "expectedResults": [
+      "After Save the Name field shows the new qa4igb name (requirement 7.2.a)",
+      "After reload the Name field still shows the new name (requirement 7.3.b)"
+     ],
+     "testData": {
+      "runTag": "qapd5n"
+     },
+     "tags": [
+      "workflow",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-012",
+      "journey": "Update account profile",
+      "origin": "browser-agent",
+      "requirements": [
+       "7.2.a",
+       "7.3.b"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": null
+   },
+   "requirements": {
+    "7.2": "On the Account page the customer can change their name and default delivery address and save them; the name is required.",
+    "7.3": "Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting\u2026 Saving shows \"Saved.\"; the saved name and address are the account's from then on, wherever the account's details are shown or used, including the starting address of the next checkout."
+   }
+  },
+  {
+   "trial": "rbac-4",
+   "testKey": "WEB-048",
+   "label": "BR-08",
+   "finding": {
+    "id": "ca82c75c-447f-4dbf-bd5d-b3bca7ccbe63",
+    "fingerprint": "977bccdd11d53272e08095d01da82417c5bca8ab9ab30d733b630a0c7b99acf0",
+    "finding": {
+     "objective": null,
+     "actions": {
+      "stepCount": 10
+     },
+     "expected": {
+      "text": "The message 'Give the note a title.' appears under the Title field (requirement 3.4)",
+      "source": "expected:1"
+     },
+     "observed": "Signed in as ana, opened New note, entered text only (no title) and clicked Save note. The app did not show 'Give the note a title.' under the Title field and did not stay on /notes/new. It created a note (n40, owner Ana Silva, shown as \"(untitled)\") and redirected to /notes/n40. This violates rule R-b0d00a831e8a (a note without a title must be refused with 'Give the note a title.' and no note created). Expected result 2 (the Notes count unchanged) was not checked because the defect in result 1 already fails the scenario.",
+     "evidence": {
+      "screenshots": [
+       "ebd51293-ad66-4879-9bd3-75c97ed360b1",
+       "5167f772-fad4-472a-a680-0359b02e1e93"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "977bccdd11d53272e08095d01da82417c5bca8ab9ab30d733b630a0c7b99acf0",
+     "modelVersion": "b96600ee-f217-407f-8d94-a093c41f5c6b",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 10,
+       "summary": "Replay 1 in a fresh browser as a newly registered account: stopped at step 10 (Verify visible of text \"Give the note a title.\"), the check of expected:1: expect(locator).toBeVisible() failed"
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 10,
+       "summary": "Replay 2 in a fresh browser as a newly registered account: stopped at step 10 (Verify visible of text \"Give the note a title.\"), the check of expected:1: expect(locator).toBeVisible() failed"
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T03:55:22.237Z",
+    "testId": "a715917b-d209-4d15-b59d-dd965086da40",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "visible",
+     "target": "Give the note a title.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Give the note a title.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "visible",
+     "target": "Give the note a title.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Give the note a title.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 10,
+     "check": "visible",
+     "target": "Give the note a title.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('Give the note a title.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "POST",
+       "path": "/api/notes",
+       "status": 201,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/notes/n4",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "a715917b-d209-4d15-b59d-dd965086da40",
+    "title": "Note cannot be created without a title",
+    "spec": {
+     "testId": "WEB-048",
+     "title": "Note cannot be created without a title",
+     "description": "Open the New note form, enter text only and click Save note.",
+     "kind": "web",
+     "category": "Notes",
+     "type": "validation",
+     "priority": "high",
+     "preconditions": [
+      "Signed in as ana"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/notes/new",
+       "description": "Open /notes/new"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "{{credentials.username}}",
+       "description": "Enter \"{{credentials.username}}\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.password}}",
+       "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Sign in",
+        "exact": true
+       },
+       "description": "Click button \"Sign in\""
+      },
+      {
+       "action": "wait",
+       "ms": 0,
+       "until": "visible",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "New note",
+        "exact": true
+       },
+       "description": "Wait until link \"New note\" is visible"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Notes",
+        "exact": true
+       },
+       "description": "Click link \"Notes\""
+      },
+      {
+       "action": "navigate",
+       "url": "/notes/new",
+       "description": "Open /notes/new"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Text"
+       },
+       "value": "Note body qad8xc {{unique}} - created without a title",
+       "description": "Enter \"Note body qad8xc {{unique}} - created without a title\" into label \"Text\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Save note",
+        "exact": true
+       },
+       "description": "Click button \"Save note\""
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "text",
+        "value": "Give the note a title."
+       },
+       "source": "expected:1",
+       "description": "Verify visible of text \"Give the note a title.\""
+      }
+     ],
+     "expectedResults": [
+      "The message 'Give the note a title.' appears under the Title field (requirement 3.4)",
+      "The page stays on /notes/new and the Notes list still shows the same number of notes as before"
+     ],
+     "testData": {
+      "runTag": "qaxfbr"
+     },
+     "tags": [
+      "validation",
+      "high"
+     ],
+     "source": {
+      "scenarioId": "S-045",
+      "journey": "Create a note",
+      "origin": "browser-agent",
+      "requirements": [
+       "3.4"
+      ]
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": null
+   },
+   "requirements": {
+    "3.4": "Every note has a title: creating a note without one is refused with \"Give the note a title.\" (API: 400), and no note is created."
+   }
+  },
+  {
+   "trial": "shop-3",
+   "testKey": "WEB-060",
+   "label": "BS-03",
+   "finding": {
+    "id": "8b53dd61-01d9-4e6b-832a-d3f7352750a9",
+    "fingerprint": "c95d9312b506061bb6a4c8b6739ebb502795434273a6e5ebe92e3c7faaac2eda",
+    "finding": {
+     "objective": {
+      "id": "OBJ-5caafd9226bb532e",
+      "kind": "rule",
+      "source": "R-593b2784ca4a",
+      "operator": "as_stated"
+     },
+     "actions": {
+      "stepCount": 12
+     },
+     "expected": {
+      "text": "\"A change that would make an item's quantity more than 10 is refused with \\\"You can order up to 10 of each item.\\\" and the cart stays as it was.\" (source: R-593b2784ca4a)",
+      "source": "expected:1"
+     },
+     "observed": "Rule R-593b2784ca4a (max 10 of each item in cart) is not enforced. A new account added Trail Mug x10 (accepted). On the cart page, changing that item's quantity to 11 and clicking Update was accepted: the row now shows Quantity 11, line total $137.50, and the total is $137.50. No \"You can order up to 10 of each item.\" message appeared. Expected: refused with that message and the cart unchanged (quantity 10, $125.00).",
+     "evidence": {
+      "screenshots": [
+       "e1b0aab2-5347-4c5e-b980-ca5a143d0407",
+       "1d7f0b93-3c4b-46d1-9511-3e1587d1d82f"
+      ],
+      "requests": [],
+      "console": []
+     },
+     "capture": "captured",
+     "independence": "independent",
+     "confidence": "high",
+     "fingerprint": "c95d9312b506061bb6a4c8b6739ebb502795434273a6e5ebe92e3c7faaac2eda",
+     "modelVersion": "5b3ce641-216f-4ef4-9a4a-849645961215",
+     "replays": [
+      {
+       "label": "Replay 1 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 12,
+       "summary": "Replay 1 in a fresh browser as a newly registered account: stopped at step 12 (Verify visible of text \"You can order up to 10 of each item.\"), the check of expected:1: expect(locator).toBeVisible() failed"
+      },
+      {
+       "label": "Replay 2 in a fresh browser",
+       "outcome": "failed",
+       "failedStep": 12,
+       "summary": "Replay 2 in a fresh browser as a newly registered account: stopped at step 12 (Verify visible of text \"You can order up to 10 of each item.\"), the check of expected:1: expect(locator).toBeVisible() failed"
+      }
+     ]
+    },
+    "firstSeenAt": "2026-11-26T06:36:16.334Z",
+    "testId": "e388beaa-3d9e-4382-a775-823cd7c93392",
+    "confidence": "high",
+    "capture": "captured"
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "visible",
+     "target": "You can order up to 10 of each item.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('You can order up to 10 of each item.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "PATCH",
+       "path": "/api/cart/items/p1",
+       "status": 200,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/cart",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "visible",
+     "target": "You can order up to 10 of each item.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('You can order up to 10 of each item.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "PATCH",
+       "path": "/api/cart/items/p1",
+       "status": 200,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/cart",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    },
+    {
+     "outcome": "failed",
+     "failedStep": 12,
+     "check": "visible",
+     "target": "You can order up to 10 of each item.",
+     "error": "Error: expect(locator).toBeVisible() failed\n\nLocator: getByText('You can order up to 10 of each item.')\nExpected: visible\nTimeout: 8000ms\nError: element(s) not found",
+     "requests": [
+      {
+       "method": "PATCH",
+       "path": "/api/cart/items/p1",
+       "status": 200,
+       "own": true
+      },
+      {
+       "method": "GET",
+       "path": "/cart",
+       "status": 200,
+       "own": true
+      }
+     ],
+     "stack": [],
+     "account": "as a newly registered account"
+    }
+   ],
+   "test": {
+    "id": "e388beaa-3d9e-4382-a775-823cd7c93392",
+    "title": "As stated: rule \"R-593b2784ca4a\"",
+    "spec": {
+     "testId": "WEB-060",
+     "title": "As stated: rule \"R-593b2784ca4a\"",
+     "description": "Operator: As stated. Objective OBJ-5caafd9226bb532e (rule, source \"R-593b2784ca4a\").\n\nSteps you must take:\n1. Do the preconditions, then follow the stated steps in order.\n2. Check each expected result with an assert that cites it.\n\nUse {{unique}} in every value that must be new (names, emails, references), so a second run does not collide with the first.\n\nCite the expected result an assert proves as its source (expected:1).\n\nThe question, as data from the application's sources: \"Does the application keep rule R-593b2784ca4a: \\\"A customer can have at most 10 of each item in the cart.\\\"?\"",
+     "kind": "web",
+     "category": "Exploration",
+     "type": "functional",
+     "priority": "medium",
+     "preconditions": [
+      "Signed in as a newly registered account with an empty cart and no orders: build every cart line, order or saved detail the test checks with its own steps"
+     ],
+     "steps": [
+      {
+       "action": "navigate",
+       "url": "/",
+       "description": "Open /"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Create a new account so the cart starts empty"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Name"
+       },
+       "value": "QA Tester {{unique}}",
+       "description": "Enter \"QA Tester {{unique}}\" into label \"Name\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Email"
+       },
+       "value": "qa{{unique}}@example.com",
+       "description": "Enter \"qa{{unique}}@example.com\" into label \"Email\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "label",
+        "value": "Password"
+       },
+       "value": "{{credentials.password}}",
+       "description": "Enter \"{{credentials.password}}\" into label \"Password\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Create account",
+        "exact": true
+       },
+       "description": "Submit registration"
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "link",
+        "value": "Trail Mug",
+        "exact": true
+       },
+       "description": "Click link \"Trail Mug\""
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "role",
+        "role": "spinbutton",
+        "value": "Quantity",
+        "exact": true
+       },
+       "value": "10",
+       "description": "Enter \"10\" into spinbutton \"Quantity\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Add to cart",
+        "exact": true
+       },
+       "description": "Add 10 units to cart (the maximum)"
+      },
+      {
+       "action": "fill",
+       "locator": {
+        "by": "role",
+        "role": "spinbutton",
+        "value": "Quantity",
+        "exact": true
+       },
+       "value": "11",
+       "description": "Enter \"11\" into spinbutton \"Quantity\""
+      },
+      {
+       "action": "click",
+       "locator": {
+        "by": "role",
+        "role": "button",
+        "value": "Update",
+        "exact": true
+       },
+       "description": "Try to change quantity to 11"
+      },
+      {
+       "action": "assert",
+       "check": "visible",
+       "locator": {
+        "by": "text",
+        "value": "You can order up to 10 of each item."
+       },
+       "source": "expected:1",
+       "description": "Verify visible of text \"You can order up to 10 of each item.\""
+      }
+     ],
+     "expectedResults": [
+      "\"A change that would make an item's quantity more than 10 is refused with \\\"You can order up to 10 of each item.\\\" and the cart stays as it was.\" (source: R-593b2784ca4a)"
+     ],
+     "testData": {},
+     "tags": [
+      "functional",
+      "medium"
+     ],
+     "source": {
+      "scenarioId": "OBJ-5caafd9226bb532e-as_stated",
+      "origin": "browser-agent"
+     }
+    },
+    "meta": {
+     "layer": "page"
+    },
+    "validationReason": null
+   },
+   "requirements": {}
+  }
+ ]
+}

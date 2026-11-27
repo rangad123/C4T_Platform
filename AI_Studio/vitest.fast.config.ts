@@ -420,6 +420,7 @@ export default defineConfig({
             "tests/session-end-own-unit.test.ts",
             "tests/creation-run-version-unit.test.ts",
             "tests/impact-page-code-unit.test.ts",
+            "tests/l4-evidence-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,

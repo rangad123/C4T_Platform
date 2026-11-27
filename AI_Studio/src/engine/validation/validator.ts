@@ -8,6 +8,7 @@
  *   FAILED_VALIDATION  could not be made to pass (environment problem, unfixable, attempts exhausted)
  */
 import { documentedCallerStatus } from "../api/documented-status.js";
+import { unstatedTypeAccepted } from "../api/test-specs.js";
 import { endsSession, endsSharedSession, RISKY_SKIPPED, riskyKindOf, SESSION_END_SKIPPED } from "./risky.js";
 import { RELATION_FAILURE_PREFIX } from "./relation.js";
 
@@ -574,6 +575,9 @@ export function classifyFailedRun(spec: TestSpec, run: ScriptRun): { status: "NE
     // A page that loaded a captcha stopped the test: said plainly, never sent to repair (hard sign-ins, ../auth/captcha-run.ts).
     const captcha = captchaFinding(spec, run);
     if (captcha) return { status: "NEEDS_REVIEW", reason: captcha };
+    // A wrong-type value the API accepted, where nothing states it is refused, is the test's expectation, not a finding (api/test-specs.ts).
+    const unstatedType = unstatedTypeAccepted(spec, run);
+    if (unstatedType) return { status: "FAILED_VALIDATION", reason: unstatedType };
     // Facts beat models: some API failures are unambiguous application findings.
     const finding = deterministicFinding(spec, run);
     if (finding) return { status: "NEEDS_REVIEW", reason: finding };
@@ -587,7 +591,21 @@ export function classifyFailedRun(spec: TestSpec, run: ScriptRun): { status: "NE
 export function deterministicFinding(spec: TestSpec, run: ScriptRun): string | undefined {
     return spec.kind === "api"
         ? (securityFinding(spec, run) ?? accessFinding(spec, run) ?? contractFinding(spec, run) ?? latencyFinding(spec, run) ?? loadFinding(spec, run) ?? apiFinding(spec, run))
-        : (phoneQualityFinding(spec, run) ?? a11yFinding(spec, run) ?? healthFinding(spec, run) ?? performanceFinding(spec, run) ?? inputFinding(spec, run) ?? accessFinding(spec, run) ?? visionFinding(spec, run) ?? visualFinding(spec, run));
+        : (phoneQualityFinding(spec, run) ?? a11yFinding(spec, run) ?? healthFinding(spec, run) ?? performanceFinding(spec, run) ?? inputFinding(spec, run) ?? accessFinding(spec, run) ?? visionFinding(spec, run) ?? visualFinding(spec, run) ?? webSecurityCheckFinding(spec, run));
+}
+
+/**
+ * A C11 page check the engine made itself (security/functional.ts, stored markup injection): every step up to its stated check passed
+ * and the stated check failed. That is a fact about the page, like the API branch's security-check case in apiFinding.
+ */
+export function webSecurityCheckFinding(spec: TestSpec, run: ScriptRun): string | undefined {
+    if (spec.source.origin !== "security-check" || run.status !== "failed") return undefined;
+    const failed = run.steps.find((s) => s.status === "failed");
+    const step = failed ? spec.steps[failed.index] : undefined;
+    if (!failed || step?.action !== "assert" || !step.source) return undefined;
+    if (run.steps.some((s) => s.index < failed.index && s.status !== "passed")) return undefined;
+    const detail = (failed.error ?? "").split("\n").filter((l, i) => i === 0 || /^(Expected|Received):/.test(l.trim())).map((l) => l.trim()).join(" ").slice(0, 300);
+    return `The page breaks a stated rule (${step.source.slice(0, 200)}): the check "${failed.title}" failed: ${detail}`;
 }
 
 /**

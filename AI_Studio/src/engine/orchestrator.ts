@@ -45,6 +45,7 @@ import { handOverLine, rateLimitSpec, sensitiveFields, sensitiveFieldSpecs, stor
 import { planScenarios, requirementsCoverage, rulesForScenario } from "./planning/planner.js";
 import type { StoredPlan } from "./planning/preview.js";
 import { openMemory, secretValues, type MemoryStorage } from "./memory/session.js";
+import { scrubSecretValues } from "./spec/secret-values.js";
 import { reuseMessage } from "./memory/reuse.js";
 import { ProbeReuse, type KnownApis, type KnownPages } from "./memory/probe-reuse.js";
 import { EVENT_PAGES_REUSED, explorationReuseOn } from "./llm/without-ai.js";
@@ -924,6 +925,8 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
             throwIfAborted(ctx.signal);
             // Stored sign-in details only go to the application's own site: refused before anything is created.
             assertCredentialsStayHome(spec, renderCtx);
+            // No written value or title holds one of the run's secrets (L12: a "wrong" password built from the real one).
+            scrubSecretValues(spec, authoringSecretsOf(req));
             // Each check names what states its expectation (the API document, the test's requirement), so verification can tell stated from inferred.
             withStatedSources(spec, model.apis);
             // Which model version of the application the test was made from, when the exploration had one.
@@ -1737,6 +1740,7 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                     },
                     async onRepaired(t, spec) {
                         const h = handles.get(t.spec.testId)!;
+                        scrubSecretValues(spec, authoringSecretsOf(req));
                         await sink.updateTest(h, { spec });
                         const script = renderWithAdapter(spec, t.framework, renderCtx);
                         scriptIds.set(t.spec.testId, await sink.saveScript(h, script, true));
