@@ -9,7 +9,14 @@ import { parentNode, visibleNodes, type TreeNode } from "./outcome";
  * and Space select. Selecting a node shows its test cases (CaseOutcome.tsx); selecting it again shows every case.
  */
 export function OutcomeTree({ roots, counts, selected, onSelect, label }: { roots: TreeNode[]; counts: ReadonlyMap<string, number>; selected: string | null; onSelect: (path: string | null) => void; label: string }) {
-    const [expanded, setExpanded] = useState<Set<string>>(() => new Set(roots.filter((r) => r.children.length).map((r) => r.path)));
+    // Roots start open, also a root whose pages arrive after the first render (a run still exploring): the person's toggles are kept
+    // apart, so a root is open unless they closed it and any other node is closed unless they opened it (fresh review 2, step 2).
+    const [toggled, setToggled] = useState<ReadonlySet<string>>(() => new Set());
+    const expanded = useMemo(() => {
+        const open = new Set([...toggled].filter((p) => !roots.some((r) => r.path === p)));
+        for (const r of roots) if (!toggled.has(r.path)) open.add(r.path);
+        return open;
+    }, [roots, toggled]);
     const visible = useMemo(() => visibleNodes(roots, expanded), [roots, expanded]);
     const [focused, setFocused] = useState<string | null>(null);
     const items = useRef(new Map<string, HTMLLIElement>());
@@ -36,13 +43,15 @@ export function OutcomeTree({ roots, counts, selected, onSelect, label }: { root
         moved.current = true;
         setFocused(path);
     };
-    const toggle = (path: string, open?: boolean) =>
-        setExpanded((prev) => {
+    const toggle = (path: string, open?: boolean) => {
+        if ((open ?? !expanded.has(path)) === expanded.has(path)) return;
+        setToggled((prev) => {
             const next = new Set(prev);
-            if (open ?? !next.has(path)) next.add(path);
-            else next.delete(path);
+            if (next.has(path)) next.delete(path);
+            else next.add(path);
             return next;
         });
+    };
     const choose = (path: string) => onSelect(selected === path ? null : path);
 
     const onKeyDown = (e: KeyboardEvent<HTMLUListElement>) => {

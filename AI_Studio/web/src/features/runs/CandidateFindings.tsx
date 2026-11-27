@@ -313,6 +313,14 @@ function Finding({ rec, n, projectId, act }: { rec: FindingRecord; n: number; pr
             {rv.fixCheck && (
                 <p className="t-meta" role="status" data-testid="finding-fix-check">
                     {rv.fixCheck}
+                    {rv.fixCheckJobId && (
+                        <>
+                            {" "}
+                            <a href={routes.run(projectId, rv.fixCheckJobId)}>
+                                Open the check <ChevronRight size={14} aria-hidden />
+                            </a>
+                        </>
+                    )}
                 </p>
             )}
             <Actions rec={rec} projectId={projectId} act={act} />

@@ -234,6 +234,41 @@ describe("outcome report", () => {
         if (SHOTS) await shot("outcome-case-checked.png");
     });
 
+    it("opens the tree's root even when its pages arrive after the first render, so the tree shows the pages the header counts (fresh review 2, step 2)", async () => {
+        await open("full", "&grow=1");
+        await page.locator("body[data-grown]").waitFor({ state: "attached" });
+        // The root's own pages are listed without a click: the header's 12 pages are not hidden behind one "/" node.
+        const children = FULL.tree.filter((n) => n.parent === "/").map((n) => n.node);
+        expect(children.length).toBeGreaterThan(1);
+        for (const p of children) expect(await page.locator(`[role="treeitem"][data-path="${p}"]`).isVisible(), p).toBe(true);
+        expect(await page.locator('[role="treeitem"][data-path="/"]').getAttribute("aria-expanded")).toBe("true");
+        // The person can still close it, and it stays closed.
+        await page.locator('[role="treeitem"][data-path="/"] > .ot-row .ot-chev').click();
+        expect(await items().count()).toBe(1);
+    });
+
+    it("folds the requirements with no test case under their count, so the tree is not pushed down (fresh review 2, step 2)", async () => {
+        await open("checked");
+        const uncovered = page.getByTestId("outcome-uncovered");
+        const show = uncovered.locator("summary");
+        expect(await show.textContent()).toBe("Show all 2");
+        expect(await uncovered.locator("li").first().isVisible()).toBe(false);
+        // Folded, the tree starts close below the count: the block is about two lines high, not the list's length.
+        expect((await uncovered.boundingBox())!.height).toBeLessThan(120);
+        await show.focus();
+        await page.keyboard.press("Enter");
+        expect(await uncovered.locator("li").first().isVisible()).toBe(true);
+        const axe = await new AxeBuilder({ page }).include('[data-testid="case-outcome"]').analyze();
+        expect(axe.violations.map((v) => v.id)).toEqual([]);
+        await page.setViewportSize({ width: 375, height: 800 });
+        try {
+            expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+            expect((await show.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        } finally {
+            await page.setViewportSize({ width: 1280, height: 900 });
+        }
+    });
+
     it("says a stopped run kept what it found", async () => {
         await open("stopped");
         expect(await page.getByTestId("outcome-run-note").textContent()).toBe("The last run was stopped. It kept the 3 pages and 4 test cases it found before then.");

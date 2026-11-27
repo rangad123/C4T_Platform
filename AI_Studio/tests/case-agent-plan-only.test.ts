@@ -31,6 +31,7 @@ import { PLAN_ARTIFACT } from "../src/platform/plan-store.js";
 import { testingAgentsOf } from "../src/platform/routes/testing-agents.js";
 import { DEFAULT_JOB_OPTIONS } from "../src/platform/repo.js";
 import { buildServer } from "../src/platform/server.js";
+import { OLD_TOKEN_NO_AGENT } from "../src/platform/trigger-services.js";
 import { Worker } from "../src/platform/worker.js";
 import { startMemorySite, type MemorySite } from "./fixtures/memory-site.js";
 
@@ -268,6 +269,19 @@ describe("making test scripts or running tests in a Test Case Generation project
         expect(focused.status).toBe(400);
         expect(focused.body.error).toMatch(/runs a testing agent/);
         expect(jobsOf(pid).length).toBe(before);
+    });
+
+    it("an old deploy token with no agent, in a project of several agents without Test Case Generation, says exactly how to fix it", async () => {
+        const multi = await project("Old token", ["agent"], ["accessibility", "security"]);
+        const t = (await call("POST", `/api/projects/${multi}/triggers`, { label: "CI", agentId: "accessibility" })).body as { id: string; token: string };
+        await platform.db.run("UPDATE trigger_tokens SET agent_id = NULL WHERE id = ?", t.id); // as a token made before migration 76
+        const before = jobsOf(multi).length;
+        const r = await call("POST", `/api/triggers/${t.token}/run`, { commit: "abc1234" }, false);
+        expect(r.status).toBe(400);
+        expect(r.body.error).toBe(OLD_TOKEN_NO_AGENT);
+        expect(jobsOf(multi).length).toBe(before);
+        // Refused before the token's rate-limit slot is taken: the next call gets the same sentence, not a 429.
+        expect((await call("POST", `/api/triggers/${t.token}/run`, {}, false)).status).toBe(400);
     });
 
     it("a runbook's run step fails with the sentence and starts no job", async () => {

@@ -80,6 +80,8 @@ function TestRunDetail({ id, jobId }: { id: string; jobId: string }) {
     const active = a.active;
     const ms = job.startedAt && job.finishedAt ? new Date(job.finishedAt).getTime() - new Date(job.startedAt).getTime() : null;
     const exploration = job.mode === "generate" || job.mode === undefined;
+    // A verification (Check the fix, or a run's findings checked): it says what it did and how it went; its tests are not run as a run's are.
+    const verify = a.verification;
     const failing = a.tests.filter((t) => t.state === "failed");
     const problems = job.status === "FAILED" || job.status === "PARTIALLY_COMPLETED" ? friendlyJobErrors(job.error) : [];
     // On a runner the results are stored when it sends them all; until then its own report is the count.
@@ -109,7 +111,7 @@ function TestRunDetail({ id, jobId }: { id: string; jobId: string }) {
                 <section className="card card-pad stack-sm" aria-label="About this run">
                     <dl className="run-facts">
                         <dt>What ran</dt>
-                        <dd>{exploration ? `The AI explored the app and created ${plural(c.planned, "test")}` : job.mode === "agent" ? "An agent run" : job.mode === "plain" ? "A test built from a description" : job.mode === "variants" ? `${plural(c.planned, "test")} on other browsers and screen sizes` : `${plural(c.planned, "test")}${job.environment ? ` against ${job.environment}` : ""}`}</dd>
+                        <dd>{verify ? verify.what : exploration ? `The AI explored the app and created ${plural(c.planned, "test")}` : job.mode === "agent" ? "An agent run" : job.mode === "plain" ? "A test built from a description" : job.mode === "variants" ? `${plural(c.planned, "test")} on other browsers and screen sizes` : `${plural(c.planned, "test")}${job.environment ? ` against ${job.environment}` : ""}`}</dd>
                         <dt>Where</dt>
                         <dd>
                             {whereOf(job) === "this server" ? (
@@ -142,7 +144,7 @@ function TestRunDetail({ id, jobId }: { id: string; jobId: string }) {
                         <dd>{startedByText(a.startedBy)}</dd>
                     </dl>
                     <p className="run-summary" data-testid="run-summary">
-                        {active && liveSoFar ? `So far: ${liveCounts(runner.live)}.` : active ? `${c.ran} of ${plural(c.planned, "test")} have a result so far.` : job.cancelled ? `${stoppedLine({ ran: job.cancelled.ran, planned: job.cancelled.planned })}. ${job.cancelled.note}` : ranSentence(c)}
+                        {verify ? (verify.result ?? (active ? "Checking now. The result shows here when it ends." : "It ended without a result: see below.")) : active && liveSoFar ? `So far: ${liveCounts(runner.live)}.` : active ? `${c.ran} of ${plural(c.planned, "test")} have a result so far.` : job.cancelled ? `${stoppedLine({ ran: job.cancelled.ran, planned: job.cancelled.planned })}. ${job.cancelled.note}` : ranSentence(c)}
                     </p>
                     {job.counters.variantChecks ? (
                         <p className="t-secondary">
@@ -155,7 +157,7 @@ function TestRunDetail({ id, jobId }: { id: string; jobId: string }) {
                             {job.counters.testsStrengthened ? `; ${plural(job.counters.testsStrengthened, "test")} given a stronger check` : ""}.
                         </p>
                     ) : null}
-                    {!active && !exploration && (
+                    {!active && !exploration && !verify && (
                         <div className="row">
                             <RunMenu projectId={id} scope="fixed" label={`Run failing tests again${failing.length ? ` (${failing.length})` : ""}`} fixed={{ ids: failing.map((t) => t.id), description: `The ${plural(failing.length, "failing test")} of this run.`, ...sameEnvironment }} variant="primary" />
                             <RunMenu projectId={id} scope="fixed" label="Run these tests again" fixed={{ ids: a.tests.map((t) => t.id), description: `The ${plural(a.tests.length, "test")} of this run.`, ...sameEnvironment }} />
@@ -252,7 +254,7 @@ function TestRunDetail({ id, jobId }: { id: string; jobId: string }) {
                 )}
                 {a.changes && a.changes.newlyFailing.length === 0 && a.changes.newlyPassing.length === 0 && !active && <p className="t-secondary">No test changed its result since the last run.</p>}
 
-                <section className="card" aria-labelledby="run-tests-h" data-tour="run-tests">
+                {!verify && <section className="card" aria-labelledby="run-tests-h" data-tour="run-tests">
                     <div className="run-tests-head row">
                         <h2 className="t-section" id="run-tests-h">
                             {exploration ? "Tests created" : "Tests in this run"}
@@ -268,7 +270,7 @@ function TestRunDetail({ id, jobId }: { id: string; jobId: string }) {
                             <RunTestList tests={a.tests} live={followsRunner(job) ? runner.live : undefined} />
                         </div>
                     )}
-                </section>
+                </section>}
 
                 <div className="card" style={{ padding: "0 20px" }}>
                     <TechnicalDetails job={job} />

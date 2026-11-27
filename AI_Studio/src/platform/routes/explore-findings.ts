@@ -63,6 +63,7 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
         // The cause verification kept (with the project's repository and the job's model); a finding verified before that gets the
         // repository's deterministic answer (code-host/source.ts). No AI call here.
         const rc = r.rootCause ?? (await projectRootCause(p, r.projectId, [view]));
+        const fixCheck = (await store.history(r.projectId, r.id)).filter((e) => e.reason && /^(Fix claimed|Fixed: )/.test(e.reason)).at(-1)?.reason ?? null;
         const at = rc.location ? `${rc.location.file}:${rc.location.line}${rc.location.function ? ` in ${rc.location.function}()` : ""}. ` : "";
         return {
             label: label({ state: r.state, severity, confidence: conf.confidence, security: false, reproduced: isReproduced(rep) }),
@@ -92,7 +93,9 @@ export function registerExploreFindingRoutes(ctx: RouteCtx): void {
             // The issue it was filed as (the link is kept with its test, routes/integrations.ts), so a reload still says so.
             issue: (r.testId ? issues.linksForTest(r.testId)[0] : undefined) ?? null,
             // How the latest fix check went, in its history's words (findings/regression-service.ts): asked, still reproduces, or Fixed.
-            fixCheck: (await store.history(r.projectId, r.id)).filter((e) => e.reason && /^(Fix claimed|Fixed: )/.test(e.reason)).at(-1)?.reason ?? null,
+            fixCheck,
+            // The run of that check (its page says what it did and how it went), newest first.
+            fixCheckJobId: fixCheck ? (repo.listJobs(r.projectId).find((j) => j.options.fixCheck?.findingIds.includes(r.id))?.id ?? null) : null,
         };
     };
 

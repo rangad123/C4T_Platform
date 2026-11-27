@@ -22,7 +22,7 @@ import { gateJob } from "./quarantine-service.js";
 import { DEFAULT_JOB_OPTIONS, TERMINAL_STATES, type JobOptions, type JobRow } from "./repo.js";
 import { activeJobOf, OverlapError, runnableTestIds, startScheduledJob } from "./scheduler.js";
 import { workspaceAgents } from "./agent-workspace.js";
-import { TestingAgentStore } from "./testing-agents.js";
+import { runAgentOf, TestingAgentStore } from "./testing-agents.js";
 import { refuseUnlessRunsStart } from "./suite-run.js";
 import { SecretBox } from "./secrets.js";
 import { projectCoverage } from "./selection/facts.js";
@@ -98,6 +98,9 @@ export interface TriggerServices {
 const cache = new WeakMap<Platform, TriggerServices>();
 const notFound = () => new HttpError(404, "Not found");
 
+/** An old deploy token (no agent kept) in a Workspace project with several agents and no Test Case Generation: how to fix it. */
+export const OLD_TOKEN_NO_AGENT = "This deploy token was made before tokens named an agent, and this project has several testing agents. On the Workspace open After a deploy, choose New token and the agent to run, put the new token in your pipeline, then revoke this one.";
+
 export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}): TriggerServices {
     const hit = cache.get(p);
     if (hit) return hit;
@@ -169,7 +172,8 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
             // The run is the token maker's, with nobody signed in: a Crowd4Test maker is asked about first (c4t-service.ts).
             await assertC4tOwnerMayRun(p, token.createdBy);
             const row = repo.getProject(token.projectId);
-            const agentRun = Boolean(row && (await workspaceAgents(new TestingAgentStore(repo.db.sql, repo), row))?.length);
+            const agents = new TestingAgentStore(repo.db.sql, repo);
+            const agentRun = Boolean(row && (await workspaceAgents(agents, row))?.length);
             if (!agentRun) await refuseTestsInCaseAgentProject(repo, token.projectId); // a Test Case Generation project runs no tests (case-agent.ts)
             if (agentRun && input.selection === "focused") throw new HttpError(400, "This token runs a testing agent, which explores the whole application: leave out selection, pages and endpoints.");
 
@@ -201,6 +205,8 @@ export function getTriggerServices(p: Platform, opts: TriggerServiceOptions = {}
             const startedBy = { kind: "trigger", id: token.id, ownerId: token.createdBy };
             const deploy = { ...(input.commit ? { commit: input.commit } : {}), ...(input.environment ? { environment: input.environment } : {}), ...(token.label ? { label: token.label } : {}) };
             if (agentRun) {
+                // A token made before tokens kept an agent (migration 76) runs the project's default agent; with none, say how to fix it.
+                if (!token.agentId && row) await runAgentOf(agents, row, undefined).catch((e) => Promise.reject(e instanceof HttpError && e.status === 400 ? new HttpError(400, OLD_TOKEN_NO_AGENT) : e));
                 const busy = await activeJobOf(repo, token.projectId, { verifyYields: true });
                 if (busy) throw new HttpError(409, `An agent is already running in this project (${busy.status.toLowerCase().replace(/_/g, " ")}). Try again when that run has finished.`);
                 if (!store.claimSlot(token.id, minGap)) throw new RateLimited(Math.max(1, Math.ceil(store.waitMs(store.find(presented) ?? token, minGap) / 1000)));

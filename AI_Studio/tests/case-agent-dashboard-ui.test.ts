@@ -666,6 +666,20 @@ describe("the Agent Workspace (W1)", () => {
         await bothWidths("after-a-deploy");
     });
 
+    it("an old deploy token with no agent, where no agent is the default, says it runs none and how to fix it (lane H left open)", async () => {
+        const two = await project("Two Agents Store", ["agent"], ["accessibility", "security"]);
+        const made = (await api("POST", `/api/projects/${two}/triggers`, { label: "Old CI", agentId: "accessibility" })).body as { id: string };
+        await api("POST", `/api/projects/${two}/triggers`, { label: "New CI", agentId: "security" });
+        platform.db.run("UPDATE trigger_tokens SET agent_id = NULL WHERE id = ?", made.id); // as a token made before migration 76
+        await visit(routes.runs(two, "deploys"));
+        const old = page.locator(`.trig-row[data-token="${made.id}"]`);
+        await pwExpect(old).toContainText("Runs no agent");
+        await pwExpect(page.locator(".trig-row", { hasText: "New CI" })).not.toContainText("Runs no agent");
+        await pwExpect(page.locator(".trig-row", { hasText: "New CI" })).toContainText("Runs the Security Testing Agent");
+        await axe("after a deploy, old token");
+        await bothWidths("after-a-deploy-old-token");
+    });
+
     it("an agent project of other agents lands on the Workspace too, with no requirements coverage (P6)", async () => {
         await visit(routes.project(access));
         await pwExpect(card("accessibility")).toBeVisible();

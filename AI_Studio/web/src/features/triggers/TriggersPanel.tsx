@@ -19,6 +19,8 @@ export function TriggersPanel({ projectId, reloadKey = 0, workspace }: { project
     const list = useFetch<TriggerList>(`/projects/${projectId}/triggers`);
     const ws = useFetch<WorkspaceAnswer>(workspace ? `/projects/${projectId}/workspace` : null);
     const agents = ws.data?.workspace ? ws.data.agents : [];
+    // A token made before tokens kept an agent runs the only agent or Test Case Generation; with neither its runs are refused.
+    const noDefault = agents.length > 1 && !agents.some((a) => a.id === "test-generation");
     useEffect(() => {
         if (reloadKey > 0) void list.reload();
     }, [reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -59,7 +61,7 @@ export function TriggersPanel({ projectId, reloadKey = 0, workspace }: { project
                         <ul className="list divided">
                             {active.map((t) => (
                                 <li key={t.id}>
-                                    <TokenRow t={t} projectId={projectId} onChanged={list.reload} mayRevoke={!noManage} />
+                                    <TokenRow t={t} projectId={projectId} onChanged={list.reload} mayRevoke={!noManage} noAgent={noDefault && !t.agentId} />
                                 </li>
                             ))}
                         </ul>
@@ -84,7 +86,7 @@ export function TriggersPanel({ projectId, reloadKey = 0, workspace }: { project
     );
 }
 
-function TokenRow({ t, projectId, onChanged, mayRevoke }: { t: TriggerToken; projectId: string; onChanged: () => Promise<void>; mayRevoke: boolean }) {
+function TokenRow({ t, projectId, onChanged, mayRevoke, noAgent }: { t: TriggerToken; projectId: string; onChanged: () => Promise<void>; mayRevoke: boolean; /** An old token whose deploys are refused: no agent kept. */ noAgent?: boolean }) {
     const [confirm, setConfirm] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
@@ -111,6 +113,7 @@ function TokenRow({ t, projectId, onChanged, mayRevoke }: { t: TriggerToken; pro
                 <Badge tone="neutral" tip="The token’s last 4 characters, to tell tokens apart. The whole token was shown only once, when it was made.">ends in {t.hint}</Badge>
                 {t.allowUrl && <Badge tone="warning" tip="The pipeline may send another address, such as a preview deploy. The run then tests that address with the project’s sign-in details.">May change the address</Badge>}
                 {t.agentName && <Badge tone="info" tip="Each deploy starts a run of this agent; its results are on the agent’s page.">Runs the {t.agentName}</Badge>}
+                {noAgent && <Badge tone="warning" tip="This token was made before tokens named an agent, so its deploys are refused. Choose New token and the agent to run, put it in your pipeline, then revoke this one.">Runs no agent</Badge>}
                 {t.runbookName && <Badge tone="info" title="A deploy starts this run sequence instead of a plain re-run">Runs the run sequence “{t.runbookName}”</Badge>}
             </div>
             <div className="facts">

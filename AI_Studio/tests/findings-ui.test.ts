@@ -531,7 +531,19 @@ describe("a person's actions, from the keyboard", () => {
         await store.note(projectId, ids.possible, { by: "engine", reason: "Fix claimed — still reproduces: it failed in 2 of 3 attempts on the application as it is now (Test lead)." });
         platform.repo.setJobStatus(verify.id, "COMPLETED"); // as a finished check leaves it, so later starts are not "still running"
         await visit(run);
-        await pwExpect(row("The search page answered something else.").getByTestId("finding-fix-check")).toHaveText("Fix claimed — still reproduces: it failed in 2 of 3 attempts on the application as it is now (Test lead).");
+        const line = row("The search page answered something else.").getByTestId("finding-fix-check");
+        await pwExpect(line).toHaveText("Fix claimed — still reproduces: it failed in 2 of 3 attempts on the application as it is now (Test lead). Open the check");
+        // The check's own page says what it did and how it went (its verdict event, job-runner.ts runVerifyJob), not "Exploration".
+        platform.repo.addEvent(verify.id, { stage: "validation", kind: "finding_verification", message: "Fix check (Test lead): 0 of 1 finding fixed. Fix claimed — still reproduces: it failed in 2 of 3 attempts." } as never);
+        await line.getByRole("link", { name: "Open the check" }).click();
+        await pwExpect(page.getByRole("heading", { level: 1 })).toHaveText("Fix check");
+        await pwExpect(page.getByTestId("run-summary")).toHaveText("Fix check (Test lead): 0 of 1 finding fixed. Fix claimed — still reproduces: it failed in 2 of 3 attempts.");
+        await pwExpect(page.getByText(`Ran the test of a finding again to check the fix ${verify.options.fixCheck!.source} claimed. A finding is Fixed only when every attempt passes.`)).toBeVisible();
+        for (const gone of ["Exploration", "No test produced a result", "Tests in this run", "Run these tests again"]) await pwExpect(page.getByText(gone, { exact: true })).toHaveCount(0);
+        await axeBoth();
+        await noSidewaysScroll();
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await shot("fix-check-run");
     }, 60_000);
 });
 

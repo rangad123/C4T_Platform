@@ -65,6 +65,8 @@ export interface FindingReview {
     issue?: IssueLink | null;
     /** How the latest Check the fix went, as its history says it (asked, still reproduces, or Fixed); null when none was asked. */
     fixCheck?: string | null;
+    /** The run of that check. */
+    fixCheckJobId?: string | null;
 }
 
 /** One stored finding (src/platform/candidate-finding-store.ts CandidateFindingRecord). */

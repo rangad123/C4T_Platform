@@ -240,6 +240,8 @@ const publicJob = (j: JobRow) => ({
     scheduleId: j.options.scheduleId ?? null,
     runbookRunId: j.options.runbookRunId ?? null,
     environment: j.options.environment ?? null,
+    // A verification job that checks a claimed fix (findings/regression-service.ts claimFix).
+    ...(j.options.fixCheck ? { fixCheck: true } : {}),
     // The written test case this job builds the script of (case-scripts.ts): the Generate test scripts card follows them.
     ...(j.options.plainCaseId ? { caseId: j.options.plainCaseId, casesLeft: j.options.plainCaseQueue?.length ?? 0 } : {}),
     // Only for an exploration that stops at a plan, and for creation that starts from one (see routes/plans.ts).

@@ -60,6 +60,8 @@ export interface RunAnswer {
     heldBack: { id: string; testId: string; title: string; version: number | null; /** Why it was held back when it is not simply a draft (a shared step changed after approval). */ reason?: string }[];
     startedBy: { kind: "person" | "schedule" | "deploy" | "sequence"; label?: string };
     changes: { comparedWith: { jobId: string; at: string }; newlyFailing: RunChange[]; newlyPassing: RunChange[] } | null;
+    /** A verification run only: what it did and, once it ended, how it went. */
+    verification?: { what: string; result: string | null };
 }
 
 /** What a test did in a run, in the words used everywhere else. */
@@ -69,7 +71,7 @@ export const STATE_TONE: Record<RunState, "success" | "danger" | "warning" | "in
 type Mode = Job["mode"] | undefined;
 
 /** What a kind of job is called: an exploration is the AI exploring the app, a run executes tests. */
-export function runTitle(job: Pick<Job, "mode" | "environment"> & { planOnly?: boolean }): string {
+export function runTitle(job: Pick<Job, "mode" | "environment"> & { planOnly?: boolean; fixCheck?: true }): string {
     if (job.planOnly) return "Exploration, plan only";
     switch (job.mode) {
         case "plain":
@@ -82,6 +84,8 @@ export function runTitle(job: Pick<Job, "mode" | "environment"> & { planOnly?: b
             return "Browser check";
         case "validate":
             return "Run";
+        case "verify":
+            return job.fixCheck ? "Fix check" : "Finding check";
         default:
             return "Exploration";
     }

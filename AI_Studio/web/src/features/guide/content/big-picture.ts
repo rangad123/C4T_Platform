@@ -107,12 +107,13 @@ export const bigPicture: Topic[] = [
         why: "You send results to a manager, a client or an auditor.",
         steps: [
             step("Open Tests, then More actions, then Export…", "Tests", "More actions", "Export…"),
-            step("Choose Download PDF for a report you can send.", "Download PDF"),
-            step("Choose Download tests for the passing tests as a zip you can run in your own pipeline.", "Download tests"),
-            step("Choose Export as JSON for every test, or Download results for a results file other tools read.", "Export as JSON", "Download results"),
+            step("Choose Download PDF for a report to send.", "Download PDF"),
+            step("Choose Download tests for a zip of the passing tests for your pipeline.", "Download tests"),
+            step("Choose Export as JSON for every test, or Download results for a file other tools read.", "Export as JSON", "Download results"),
+            step("In an AI agent project, open Test Case Generation or API on the Workspace: Download test cases or Download report.", "AI agent", "Test Case Generation", "API", "Workspace", "Download test cases", "Download report"),
         ],
         goodToKnow: [
-            "The report has a plain headline, the most serious findings, coverage by area and the full test list. Screenshots stay in AI Studio; the report only says one exists.",
+            "The report has a plain headline, the most serious findings, coverage by area and the full test list.",
             "Credentials are never included.",
         ],
         open: { label: "Open Test scripts", to: { place: "tests" } },

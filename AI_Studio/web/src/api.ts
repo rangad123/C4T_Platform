@@ -45,6 +45,8 @@ export interface Job {
     continues?: string;
     /** Name of the environment (staging, production...) a run in "environment" mode targeted. */
     environment?: string | null;
+    /** A verification run that checks a claimed fix (Check the fix). */
+    fixCheck?: true;
     /** Who started the run: a person, a schedule, or a deploy pipeline. */
     trigger?: "manual" | "schedule" | "deploy";
     scheduleId?: string | null;

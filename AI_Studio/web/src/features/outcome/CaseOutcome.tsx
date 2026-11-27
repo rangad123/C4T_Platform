@@ -86,13 +86,20 @@ export function CaseOutcome({ outcome, downloadHref, onDownload, emptyActions, t
                                 <TriangleAlert size={16} aria-hidden />
                                 {plural(outcome.uncovered!.length, "requirement")} with no test case
                             </h3>
-                            <ul>
-                                {outcome.uncovered!.map((r) => (
-                                    <li key={r.ref}>
-                                        <span className="oc-mono">{r.ref}</span> {r.title}
-                                    </li>
-                                ))}
-                            </ul>
+                            {/* Folded: a long list (130 in the fresh review) would push the tree several screens down; the count says enough first. */}
+                            <details>
+                                <summary className="oc-fold">
+                                    <ChevronRight size={16} aria-hidden />
+                                    Show {outcome.uncovered!.length === 1 ? "it" : `all ${outcome.uncovered!.length}`}
+                                </summary>
+                                <ul>
+                                    {outcome.uncovered!.map((r) => (
+                                        <li key={r.ref}>
+                                            <span className="oc-mono">{r.ref}</span> {r.title}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </details>
                         </div>
                     )}
                     {outcome.missing.length > 0 && (

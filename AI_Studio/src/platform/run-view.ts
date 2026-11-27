@@ -88,6 +88,8 @@ export interface RunDetail {
     startedBy: { kind: "person" | "schedule" | "deploy" | "sequence"; label?: string };
     /** Compared with the previous result of each test that ran. Null when nothing ran before or the run is not a plain re-run. */
     changes: { comparedWith: { jobId: string; at: string }; newlyFailing: RunChange[]; newlyPassing: RunChange[] } | null;
+    /** A verification job only (a fix check, or a run's findings verified): what it did and, once it ended, how it went (its last verdict event). */
+    verification?: { what: string; result: string | null };
 }
 
 const MAX_REASON = 240;
@@ -315,5 +317,16 @@ export function buildRunDetail(repo: Repo, job: JobRow): RunDetail {
     const order: Record<RunTestState, number> = { failed: 0, finding: 1, running: 2, waiting: 3, not_run: 4, passed: 5 };
     rows.sort((a, b) => order[a.state] - order[b.state] || a.testId.localeCompare(b.testId, undefined, { numeric: true }));
 
-    return { jobId: job.id, projectId: job.projectId, mode, active, counts, tests: rows, heldBack, startedBy: startedBy(db, job), changes: changesSince(db, job, tests, got) };
+    return { jobId: job.id, projectId: job.projectId, mode, active, counts, tests: rows, heldBack, startedBy: startedBy(db, job), changes: changesSince(db, job, tests, got), ...(mode === "verify" ? { verification: verificationOf(repo, job) } : {}) };
+}
+
+/** What a verification job did, in the words job-runner.ts runVerifyJob reports it with, and its result line (null until it ends). */
+function verificationOf(repo: Repo, job: JobRow): NonNullable<RunDetail["verification"]> {
+    const fix = job.options.fixCheck;
+    const n = fix ? fix.findingIds.length : 0;
+    const what = fix
+        ? `Ran the test of ${n === 1 ? "a finding" : `${n} findings`} again to check the fix ${fix.source} claimed${fix.headSha ? ` (build ${fix.headSha.slice(0, 7)})` : ""}. A finding is Fixed only when every attempt passes.`
+        : `Ran the tests of the findings of run ${(job.options.verifyJobId ?? "").slice(0, 8)} again, to see whether each reproduces.`;
+    const result = repo.db.get<{ message: string }>("SELECT message FROM agent_events WHERE job_id = ? AND kind = 'finding_verification' ORDER BY id DESC LIMIT 1", job.id)?.message ?? null;
+    return { what, result };
 }

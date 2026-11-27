@@ -17,6 +17,11 @@
 /* What the understanding says is missing. */
 .oc-missing { margin: 20px 24px 0; padding: 16px 20px; border: 1px solid var(--status-warning-line); border-radius: var(--radius-card); background: var(--status-warning-bg); color: var(--status-warning-fg); }
 .oc-missing .oc-subhead { color: inherit; margin-bottom: 8px; }
+.oc-fold { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; cursor: pointer; list-style: none; font-size: var(--type-body-sm-size); font-weight: var(--fw-medium); }
+.oc-fold::-webkit-details-marker { display: none; }
+.oc-fold svg { transition: transform 140ms cubic-bezier(.2, 0, 0, 1); }
+details[open] > .oc-fold svg { transform: rotate(90deg); }
+details[open] > .oc-fold { margin-bottom: 8px; }
 .oc-missing ul { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--type-body-sm-size); line-height: var(--type-body-sm-line); }
 
 /* Pages on the left, the selected page's test cases on the right; one column on narrow screens. */
@@ -101,7 +106,8 @@
     .oc-head .btn { width: 100%; }
     .oc-note { padding: 10px 20px; }
     .oc-missing { margin: 16px 20px 0; }
+    .oc-fold { min-height: 44px; }
     .oc-detail { padding: 0 16px 16px 16px; }
     .ot-group { margin-left: 11px; padding-left: 6px; }
 }
-@media (prefers-reduced-motion: reduce) { .ot-chev svg, .oc-case-chev { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .ot-chev svg, .oc-case-chev, .oc-fold svg { transition: none; } }
