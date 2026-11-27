@@ -421,6 +421,8 @@ export default defineConfig({
             "tests/creation-run-version-unit.test.ts",
             "tests/impact-page-code-unit.test.ts",
             "tests/l4-evidence-unit.test.ts",
+            "tests/finding-report-standalone-unit.test.ts",
+            "tests/plain-status-words-unit.test.ts",
         ],
         testTimeout: 60_000,
         hookTimeout: 30_000,
