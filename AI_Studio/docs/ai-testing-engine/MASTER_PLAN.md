@@ -19,13 +19,13 @@ found that today's generated tests check what the application does when they are
 | Phase | Status |
 |---|---|
 | 0 Audit | Done (7 documents in this folder) |
-| 1 Foundation and baseline benchmark | In progress — `PHASE_1_IMPLEMENTATION.md` |
-| 2 Application intelligence | Not started |
-| 3 Exploratory engine | Not started |
-| 4 Multi-layer validation | Not started |
-| 5 Verification, dedupe, root cause | Not started |
-| 6 Change-aware testing | Not started |
-| 7 Evaluation and readiness | Not started |
+| 1 Foundation and baseline benchmark | Done; live in `1a756d77` |
+| 2 Application intelligence | Done; live in `5209fc85`, measured build `381b1cb8` |
+| 3 Exploratory engine | Done; live in `be712d18` |
+| 4 Multi-layer validation | Done; live in `be712d18` |
+| 5 Verification, dedupe, root cause | Done; live in `be712d18`, fixes in `3cf5bd04` |
+| 6 Change-aware testing | Done; live in `be712d18` |
+| 7 Evaluation and readiness | Benchmark ladder measured on `3cf5bd04`; follow-up fixes in `7d66fc10` and `33a3916d`. Some targets are not met yet (false positives, evidence completeness) |
 
 ## Phase 1 decisions (approved)
 
