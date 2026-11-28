@@ -25,7 +25,7 @@ found that today's generated tests check what the application does when they are
 | 4 Multi-layer validation | Done; live in `be712d18` |
 | 5 Verification, dedupe, root cause | Done; live in `be712d18`, fixes in `3cf5bd04` |
 | 6 Change-aware testing | Done; live in `be712d18` |
-| 7 Evaluation and readiness | Benchmark ladder measured on `3cf5bd04`; follow-up fixes in `7d66fc10` and `33a3916d`. Some targets are not met yet (false positives, evidence completeness) |
+| 7 Evaluation and readiness | Benchmark ladder measured on `3cf5bd04`; follow-up fixes in `7d66fc10` and `33a3916d`, measured by a paid re-check on `33a3916d` (seven more targets met). Later changes checked offline only, not yet in a paid run. Not met yet: E2, E7, L13, V2 on the shop, V4, E4 on the shop |
 
 ## Phase 1 decisions (approved)
 
