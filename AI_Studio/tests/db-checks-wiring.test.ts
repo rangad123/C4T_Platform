@@ -20,7 +20,7 @@ import { parseOpenApi } from "../src/engine/api/openapi.js";
 import { generateApiSpecs } from "../src/engine/api/test-specs.js";
 import { generateApiWorkflowSpecs } from "../src/engine/api/workflows.js";
 import { benchDataProbe, registerBenchProbe } from "../src/engine/database/bench-data.js";
-import { duplicateChecksOf, integrityChecks, withDatabaseChecks } from "../src/engine/database/checks.js";
+import { duplicateChecksOf, integrityChecks, isAbsenceCheck, withDatabaseChecks } from "../src/engine/database/checks.js";
 import type { DatabaseProbe } from "../src/engine/database/probe.js";
 import { proposeRowRelations } from "../src/engine/database/propose.js";
 import { startDbCheckService } from "../src/engine/database/service.js";
@@ -109,10 +109,11 @@ const SHOP: Plan = {
             profile: withChecks("API-001", pick(all, "Workflow: what is written is read back (PUT /api/profile"), c),
             orders: withChecks("API-002", pick(all, "Workflow: order lifecycle"), c),
             registerAgain: handSpec("API-003", "Register an existing e-mail in another case", withDatabaseChecks([req("POST", "/api/register", { auth: "none", body: { name: "Alice Again", email: "ALICE@example.test", password: "Password1!" } })], c.schema, c.absence, c.budget)),
-            // The documented 409 case the engine generates (C2), with the duplicate checks the orchestrator gives it (L8).
+            // The documented 409 case the engine generates (C2), with the duplicate checks the orchestrator gives it (L8), sourced by the
+            // document's 409 as the orchestrator names it (bench-shop documents POST /api/register 409).
             caseAgain: (() => {
                 const d = documented409(all409);
-                return TestSpecSchema.parse({ ...d, testId: "API-004", steps: withDatabaseChecks(d.steps, c.schema, duplicateChecksOf(d.steps, c.absence), c.budget) });
+                return TestSpecSchema.parse({ ...d, testId: "API-004", steps: withDatabaseChecks(d.steps, c.schema, duplicateChecksOf(d.steps, c.absence, "API document: POST /api/register 409"), c.budget) });
             })(),
         };
     },
@@ -263,6 +264,20 @@ describe("through the engine (runGeneration, API only, data changes on)", () => 
         expect(readBacks.length).toBeGreaterThan(0);
         expect(summary.layers?.storedData).toEqual({ status: "ran", tests: readBacks.length });
         expect(tests.some((t) => /Database check failed.*orphans cart_items\(cartId\) -> carts\(id\)/.test(t.reason ?? ""))).toBe(true);
+        // Lane M: a key check with no source (counted over the whole table) runs after every sourced check of its test, so rows other
+        // tests write cannot hide them; the documented 409 case's duplicate check carries the document's 409 and stays before it (BS-17).
+        const isDb = (s: Step) => s.action === "assertResponse" && s.check === "dbCheck";
+        const src = (s: Step) => (s as { source?: string }).source;
+        for (const t of tests) {
+            // An exists check looks at the test's own written row only; the absence checks count over the whole table.
+            const firstKey = t.steps.findIndex((s) => isDb(s) && !src(s) && isAbsenceCheck((s as { name: string }).name));
+            if (firstKey >= 0) expect(t.steps.slice(firstKey).some((s) => !isDb(s) && src(s)), t.testId).toBe(false);
+        }
+        const caseAgain = tests.find((t) => t.steps.some((s) => s.action === "request" && s.path === "/api/register") && t.steps.some((s) => s.action === "assertResponse" && s.check === "status" && Number(s.expected) === 409));
+        const dup = caseAgain?.steps.findIndex((s) => isDb(s) && (s as { name?: string }).name === "duplicates users(email) any case") ?? -1;
+        expect(dup).toBeGreaterThan(-1);
+        expect(src(caseAgain!.steps[dup]!)).toBe("API document: POST /api/register 409");
+        expect(dup).toBeLessThan(caseAgain!.steps.findIndex((s) => s.action === "assertResponse" && s.check === "status" && Number(s.expected) === 409));
         const rules = prompts.filter((p) => /rules each stored row/.test(p.system));
         expect(rules).toHaveLength(1);
         const tables = rules[0]!.prompt.slice(rules[0]!.prompt.indexOf("<<<TABLES"));

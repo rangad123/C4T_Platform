@@ -92,19 +92,27 @@ describe("generated checks", () => {
     });
 
     const ok = { action: "assertResponse", check: "statusClass", expected: "2xx", description: "" } as Step;
-    it("a data-changing test gets its persistence check after the 2xx write and the absence checks right after its last write; a read-only one none", () => {
+    it("a data-changing test gets its persistence check after the 2xx write, the sourced absence checks right after its last write and the unsourced ones at the end; a read-only one none", () => {
         const steps = [req("POST", "/api/orders", { extract: { orderId: "id" } }), ok, req("GET", "/api/orders"), ok];
         const out = withDatabaseChecks(steps, SCHEMA, [{ name: "orphans cart_items(cartId) -> carts(id)" }, { name: "relation orders: total >= 0", source: "6.1" }], { left: 40 });
-        // L8: the absence checks run before the API assertions on the last write and any read-back after it, so a stored-data defect
-        // fails at the database check even when the API check would fail too.
-        expect(out.map((s) => (s.action === "assertResponse" && s.check === "dbCheck" ? s.name : s.action))).toEqual(["request", "orphans cart_items(cartId) -> carts(id)", "relation orders: total >= 0", "assertResponse", "exists orders where id = '{{orderId}}'", "request", "assertResponse"]);
-        expect(out[2]).toMatchObject({ source: "6.1" });
-        // A documented 409 (BS-17's shape): the duplicate check comes before the 409 assertion, not after it.
-        const status409 = { action: "assertResponse", check: "status", expected: 409, description: "" } as Step;
+        // L8: a stated row rule runs before the API assertions on the last write and any read-back after it, so a stored-data defect
+        // fails at the database check even when the API check would fail too. A key check (no source, counted over the whole table, so
+        // other tests' rows can break it) runs last: it never hides the test's own sourced checks (lane M, re-check shop API-070).
+        expect(out.map((s) => (s.action === "assertResponse" && s.check === "dbCheck" ? s.name : s.action))).toEqual(["request", "relation orders: total >= 0", "assertResponse", "exists orders where id = '{{orderId}}'", "request", "assertResponse", "orphans cart_items(cartId) -> carts(id)"]);
+        expect(out[1]).toMatchObject({ source: "6.1" });
+        expect(out.at(-1)).not.toHaveProperty("source");
+        // A documented 409 (BS-17's shape): the duplicate check carries the 409's source and comes before the 409 assertion, not after it.
+        const status409 = { action: "assertResponse", check: "status", expected: 409, description: "", source: "API document: POST /api/register 409" } as Step;
         const again = [req("POST", "/api/register", { body: { name: "A", email: "a@x.test" } }), ok, req("POST", "/api/register", { body: { name: "A", email: "A@X.TEST" } }), status409];
         const absence = [{ name: "duplicates users(email) any case" }, { name: "duplicates carts(userId)" }, { name: "orphans cart_items(cartId) -> carts(id)" }];
-        expect(duplicateChecksOf(again, absence)).toEqual([{ name: "duplicates users(email) any case" }]);
-        expect(withDatabaseChecks(again, SCHEMA, duplicateChecksOf(again, absence), { left: 40 }).map((s) => (s.action === "assertResponse" ? (s.check === "dbCheck" ? s.name : s.check) : s.action))).toEqual(["request", "statusClass", "request", "duplicates users(email) any case", "status"]);
+        expect(duplicateChecksOf(again, absence)).toEqual([{ name: "duplicates users(email) any case", source: "API document: POST /api/register 409" }]);
+        const placed = withDatabaseChecks(again, SCHEMA, duplicateChecksOf(again, absence), { left: 40 });
+        expect(placed.map((s) => (s.action === "assertResponse" ? (s.check === "dbCheck" ? s.name : s.check) : s.action))).toEqual(["request", "statusClass", "request", "duplicates users(email) any case", "status"]);
+        expect(placed[3]).toMatchObject({ source: "API document: POST /api/register 409" });
+        // The orchestrator passes the document's 409 (the assertion gets its source only later, withStatedSources); without one the check is a key check.
+        const bare = again.map((s) => (s === status409 ? { ...status409, source: undefined } : s)) as Step[];
+        expect(duplicateChecksOf(bare, absence, "API document: POST /api/register 409")).toEqual([{ name: "duplicates users(email) any case", source: "API document: POST /api/register 409" }]);
+        expect(duplicateChecksOf(bare, absence)).toEqual([{ name: "duplicates users(email) any case" }]);
         expect(withDatabaseChecks([req("GET", "/api/orders"), ok], SCHEMA, [{ name: "orphans cart_items(cartId) -> carts(id)" }], { left: 40 })).toHaveLength(2);
         // A write as the test's last step (nothing after it) still gets the absence checks; so does a delete.
         for (const last of [req("POST", "/api/register", { body: { email: "A@x.test" } }), req("DELETE", "/api/notes/n3")]) expect(withDatabaseChecks([last], SCHEMA, [{ name: "duplicates users(email) any case" }], { left: 40 })).toHaveLength(2);

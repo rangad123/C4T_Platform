@@ -1439,7 +1439,9 @@ async function runWebAndApiGeneration(ctx: EngineContext, req: GenerationRequest
                 const key = await sink.nextTestKey("API");
                 // A documented 409 (a repeat, the same email in other letter case) gets the database's duplicate checks over the fields it
                 // sends, before its 409 assertion: an accepted repeat then fails at the database layer (L8, BS-17).
-                const dup = db && d.steps.some((x) => x.action === "assertResponse" && x.check === "status" && Number(x.expected) === 409) ? duplicateChecksOf(d.steps, db.absence) : [];
+                // Its source is the API document's 409, as withStatedSources names it (persistNew adds those later, so not yet on the step).
+                const doc409 = ep?.spec?.responses.some((r) => r.status === "409") ? `API document: ${ep.method.toUpperCase()} ${ep.path} 409` : undefined;
+                const dup = db && d.steps.some((x) => x.action === "assertResponse" && x.check === "status" && Number(x.expected) === 409) ? duplicateChecksOf(d.steps, db.absence, doc409) : [];
                 const steps = db && dup.length ? withDatabaseChecks(d.steps, db.schema, dup, db.budget) : d.steps;
                 if (steps.length > d.steps.length && dbLayer && "checks" in dbLayer) {
                     dbLayer.checks += steps.length - d.steps.length;
