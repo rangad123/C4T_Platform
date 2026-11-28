@@ -76,8 +76,9 @@ describe("a platform that refuses a finding's screenshot", () => {
 
         expect(summary.errors).toEqual([]);
         expect(summary.exploration?.stopReason).toBe("objectives_done");
-        // The screenshots were offered (one per replay of each finding), refused, and sent alone each time.
-        expect(platform.refused).toEqual(["saveImageArtifact", "saveImageArtifact", "saveImageArtifact", "saveImageArtifact"]);
+        // The screenshots were offered (one per replay of each finding: the two independence replays and the own-steps replay, whose
+        // picture an observed finding keeps), refused, and sent alone each time.
+        expect(platform.refused).toEqual(Array(6).fill("saveImageArtifact"));
         const findings = platform.created.filter((c) => c.validation === "NEEDS_REVIEW").map((c) => CandidateFindingSchema.parse(c.meta?.finding));
         expect(findings).toHaveLength(2);
         for (const f of findings) expect(f).toMatchObject({ capture: "captured", independence: "independent", evidence: { screenshots: [] } });

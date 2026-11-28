@@ -110,7 +110,10 @@ describe("the Projects page with no project", () => {
         await pwExpect(first.getByText("You have no usable AI key")).toBeVisible();
         await pwExpect(first).toContainText("ask an admin to assign an organisational key");
         await pwExpect(first.getByRole("link", { name: "Open AI keys", exact: true })).toHaveAttribute("href", "#/settings#ai-keys");
-        await pwExpect(first.getByRole("link", { name: "Open Your runner in Settings", exact: true })).toBeVisible();
+        // No test worker on this server: a runner would not help, so the panel says what does instead of linking to Your runner.
+        await pwExpect(first.getByText("Runs can’t start on this server yet")).toBeVisible();
+        await pwExpect(first).toContainText("npm run worker");
+        await pwExpect(first.getByRole("link", { name: "Open Your runner in Settings" })).toHaveCount(0);
         // None of the old full-page start screen.
         await pwExpect(page.getByText("Test any web application automatically")).toHaveCount(0);
         await pwExpect(page.getByText("What kind of testing is this project for?")).toHaveCount(0);
@@ -144,7 +147,7 @@ describe("the Projects page with no project", () => {
             const page = await pageFor("t-sam", scheme);
             await page.goto(`${BASE}/#/`);
             await pwExpect(page.getByTestId("first-project").getByText("You have no usable AI key")).toBeVisible();
-            await pwExpect(page.getByTestId("first-project").getByRole("link", { name: "Open Your runner in Settings" })).toBeVisible();
+            await pwExpect(page.getByTestId("first-project").getByText("Runs can’t start on this server yet")).toBeVisible();
             await page.waitForTimeout(400); // the colour transition settles
             await axe(page);
         }
